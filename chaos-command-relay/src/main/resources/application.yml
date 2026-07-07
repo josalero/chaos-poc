@@ -1,0 +1,38 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: chaos-command-relay
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: chaos
+    password: chaos
+
+chaos:
+  relay:
+    allowed-target-applications:
+      - chaos-poc-demo
+      - chaos-poc-downstream
+    status-timeout-seconds: 30
+    command-ttl-hours: 24
+    expected-instances-fallback:
+      chaos-poc-demo: 1
+      chaos-poc-downstream: 1
+    actuator-base-urls:
+      chaos-poc-demo: http://localhost:18080/actuator/chaosmonkey
+      chaos-poc-downstream: http://localhost:18081/actuator/chaosmonkey
+    admin-base-urls:
+      chaos-poc-demo: http://localhost:18080
+      chaos-poc-downstream: http://localhost:18081
+    verify-ui-url: http://localhost:18000
+    rabbit:
+      commands-exchange: chaos.commands.test
+      results-queue: chaos.command-results
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

@@ -1,0 +1,39 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: chaos-poc-demo
+  profiles:
+    active: local,chaos-monkey
+
+samba:
+  chaos:
+    command-listener:
+      enabled: true
+      rabbitmq:
+        host: localhost
+        port: 5672
+        username: chaos
+        password: chaos
+    demo:
+      inventory:
+        base-url: http://localhost:8081
+
+chaos:
+  monkey:
+    enabled: false
+    watcher:
+      service: true
+      restController: false
+    assaults:
+      level: 1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,chaosmonkey
+  endpoint:
+    chaosmonkey:
+      enabled: true

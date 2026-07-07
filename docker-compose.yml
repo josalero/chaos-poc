@@ -1,0 +1,95 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: chaos
+      RABBITMQ_DEFAULT_PASS: chaos
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  chaos-poc-downstream:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: chaos-poc-downstream
+    ports:
+      - "18081:8081"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker,test,chaos-monkey
+      HOSTNAME: chaos-poc-downstream
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  chaos-poc-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: chaos-poc-demo
+    ports:
+      - "18080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker,test,chaos-monkey
+      HOSTNAME: chaos-poc-demo
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      chaos-poc-downstream:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  chaos-command-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: chaos-command-relay
+    ports:
+      - "18090:8090"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      chaos-poc-downstream:
+        condition: service_healthy
+      chaos-poc-demo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8090/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+  chaos-poc-ui:
+    build:
+      context: .
+      dockerfile: chaos-poc-ui/Dockerfile
+      args:
+        VITE_DEMO_URL: /api/demo
+        VITE_OPERATOR_CONSOLE_URL: /operator/
+    ports:
+      - "18000:80"
+    depends_on:
+      chaos-command-relay:
+        condition: service_healthy
+      chaos-poc-demo:
+        condition: service_healthy

@@ -1,0 +1,36 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: chaos-poc-downstream
+  profiles:
+    active: local,chaos-monkey
+
+samba:
+  chaos:
+    command-listener:
+      enabled: true
+      rabbitmq:
+        host: localhost
+        port: 5672
+        username: chaos
+        password: chaos
+
+chaos:
+  monkey:
+    enabled: false
+    watcher:
+      service: true
+      restController: false
+    assaults:
+      level: 1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,chaosmonkey
+  endpoint:
+    chaosmonkey:
+      enabled: true

@@ -1,0 +1,7 @@
+samba:
+  chaos:
+    command-listener:
+      enabled: false
+    demo:
+      inventory:
+        base-url: http://localhost:8081

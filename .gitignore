@@ -1,0 +1,124 @@
+# ── Maven / Java ──────────────────────────────────────────────────────────────
+**/target/
+**/pom.xml.tag
+**/pom.xml.releaseBackup
+**/pom.xml.versionsBackup
+**/pom.xml.next
+**/release.properties
+**/dependency-reduced-pom.xml
+**/buildNumber.properties
+**/.mvn/timing.properties
+**/.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+
+# ── Spring Boot ───────────────────────────────────────────────────────────────
+**/spring-boot-*.log
+**/application-local.yml
+**/application-local.yaml
+**/application-local.properties
+**/application-*.local.yml
+**/application-*.local.yaml
+**/application-*.local.properties
+
+# ── Logs & runtime ────────────────────────────────────────────────────────────
+*.log
+*.log.*
+logs/
+**/logs/
+
+# ── Secrets & local config (never commit) ─────────────────────────────────────
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+secrets/
+**/secrets/
+
+# ── Node / chaos-poc-ui ───────────────────────────────────────────────────────
+chaos-poc-ui/node_modules/
+chaos-poc-ui/dist/
+chaos-poc-ui/build/
+chaos-poc-ui/.vite/
+chaos-poc-ui/.cache/
+chaos-poc-ui/coverage/
+chaos-poc-ui/*.tsbuildinfo
+chaos-poc-ui/npm-debug.log*
+chaos-poc-ui/yarn-debug.log*
+chaos-poc-ui/yarn-error.log*
+chaos-poc-ui/pnpm-debug.log*
+chaos-poc-ui/.eslintcache
+
+# ── IDEs ──────────────────────────────────────────────────────────────────────
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.factorypath
+.springBeans
+.sts4-cache/
+.apt_generated/
+.apt_generated_test/
+bin/
+out/
+*.swp
+*.swo
+*~
+
+# VS Code — ignore personal workspace state; keep shared settings if added later
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ── Docker / Compose (local overrides) ────────────────────────────────────────
+docker-compose.override.yml
+docker-compose.*.local.yml
+.docker/
+
+# ── Test & coverage ─────────────────────────────────────────────────────────
+**/surefire-reports/
+**/failsafe-reports/
+**/jacoco.exec
+**/.jacoco/
+**/test-output/
+**/coverage/
+*.lcov
+
+# ── Temp & backups ───────────────────────────────────────────────────────────
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*~
+
+# ── Cursor (ephemeral only — .cursor/skills and .cursor/rules are committed) ──
+.cursor/plans/
+.cursor/**/*.log

@@ -1,0 +1,17 @@
+{
+  "environment": "test",
+  "targetApplication": "chaos-poc-downstream",
+  "action": "CONFIGURE_AND_ENABLE",
+  "issuedBy": "poc-operator",
+  "correlationId": "scenario-downstream-inventory-latency",
+  "expiresAt": "2026-12-31T23:59:59Z",
+  "assault": {
+    "level": 1,
+    "deterministic": true,
+    "latencyActive": true,
+    "latencyRangeStart": 2000,
+    "latencyRangeEnd": 5000,
+    "exceptionsActive": false,
+    "watchedCustomServices": ["com.samba.chaos.downstream.service.InventoryService.getStock"]
+  }
+}

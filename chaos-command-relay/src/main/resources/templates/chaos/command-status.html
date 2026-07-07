@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{chaos/fragments :: head('Command status')}"></head>
+<body>
+<div th:replace="~{chaos/fragments :: header('dashboard')}"></div>
+<main id="main-content">
+  <a class="back-link" th:href="@{/chaos}">&larr; Dashboard</a>
+  <h2>Command status</h2>
+
+  <div class="card">
+    <p><strong>Command ID:</strong> <span class="cell-mono" th:text="${status.commandId()}">uuid</span></p>
+    <p><strong>Status:</strong>
+      <span th:replace="~{chaos/fragments-table :: statusBadge(${status.status()})}">PENDING</span>
+    </p>
+    <p><strong>Target:</strong> <span th:text="${status.targetApplication()}">app</span></p>
+    <p><strong>Action:</strong> <span class="cell-mono" th:text="${status.action()}">CONFIGURE_AND_ENABLE</span></p>
+    <p th:text="'Success: ' + ${status.successCount()} + ' / ' + ${status.expectedInstances()}">0 / 1</p>
+  </div>
+
+  <div class="card" th:if="${status.instances()}">
+    <h3>Per-pod results</h3>
+    <div class="data-table-wrap">
+      <table class="data-table">
+        <thead>
+        <tr>
+          <th>Pod</th>
+          <th>Outcome</th>
+          <th>Step</th>
+          <th>HTTP</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="instance : ${status.instances()}">
+          <td class="cell-mono" th:text="${instance.podName()}">pod</td>
+          <td th:text="${instance.outcome()}">SUCCESS</td>
+          <td th:text="${instance.failedStep()} ?: '—'">—</td>
+          <td th:text="${instance.httpStatus()} ?: '—'">200</td>
+        </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p class="muted" th:if="${status.status() == T(com.samba.chaos.relay.model.CommandAggregateStatus).PENDING or status.status() == T(com.samba.chaos.relay.model.CommandAggregateStatus).PARTIAL}">
+    <meta http-equiv="refresh" content="2"/>
+    Auto-refreshing every 2s until terminal status…
+  </p>
+
+  <p th:if="${status.status() == T(com.samba.chaos.relay.model.CommandAggregateStatus).APPLIED}">
+    <a class="btn btn-primary" style="width: auto"
+       th:href="@{/chaos/services/{app}(app=${status.targetApplication()})}">View service status</a>
+  </p>
+</main>
+</body>
+</html>

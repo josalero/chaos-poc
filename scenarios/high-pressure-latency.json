@@ -1,0 +1,17 @@
+{
+  "environment": "test",
+  "targetApplication": "chaos-poc-demo",
+  "action": "CONFIGURE_AND_ENABLE",
+  "issuedBy": "poc-operator",
+  "correlationId": "scenario-high-pressure",
+  "expiresAt": "2026-12-31T23:59:59Z",
+  "assault": {
+    "level": 1,
+    "deterministic": true,
+    "latencyActive": true,
+    "latencyRangeStart": 500,
+    "latencyRangeEnd": 3000,
+    "exceptionsActive": false,
+    "watchedCustomServices": ["com.samba.chaos.demo.web.OrderController.submit"]
+  }
+}

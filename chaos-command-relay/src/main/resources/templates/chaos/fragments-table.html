@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+<th:block th:fragment="statusBadge(status)">
+  <span th:if="${status == null}" class="badge badge-neutral">—</span>
+  <th:block th:if="${status != null}" th:switch="${status.name()}">
+    <span th:case="'APPLIED'" class="badge badge-applied" th:text="${status}">APPLIED</span>
+    <span th:case="'PUBLISHED'" class="badge badge-applied" th:text="${status}">PUBLISHED</span>
+    <span th:case="'FAILED'" class="badge badge-failed" th:text="${status}">FAILED</span>
+    <span th:case="'TIMED_OUT'" class="badge badge-failed" th:text="${status}">TIMED_OUT</span>
+    <span th:case="'PENDING'" class="badge badge-pending" th:text="${status}">PENDING</span>
+    <span th:case="'PARTIAL'" class="badge badge-pending" th:text="${status}">PARTIAL</span>
+    <span th:case="*" class="badge badge-neutral" th:text="${status}">—</span>
+  </th:block>
+</th:block>
+
+<svg th:fragment="icon-ban" class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+  <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
+  <path d="M7 7l10 10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+</svg>
+
+<svg th:fragment="icon-eye" class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" fill="none" stroke="currentColor" stroke-width="2"/>
+  <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/>
+</svg>
+
+<svg th:fragment="icon-rotate" class="btn-icon" viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M4 7V4h3M20 17v3h-3M7 20A8 8 0 0 1 5.3 7.5M17 4a8 8 0 0 1 1.7 12.5"
+        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+</body>
+</html>

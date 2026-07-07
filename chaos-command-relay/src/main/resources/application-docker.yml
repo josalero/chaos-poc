@@ -1,0 +1,19 @@
+spring:
+  rabbitmq:
+    host: rabbitmq
+    port: 5672
+    username: chaos
+    password: chaos
+
+chaos:
+  relay:
+    expected-instances-fallback:
+      chaos-poc-demo: 1
+      chaos-poc-downstream: 1
+    actuator-base-urls:
+      chaos-poc-demo: http://chaos-poc-demo:8080/actuator/chaosmonkey
+      chaos-poc-downstream: http://chaos-poc-downstream:8081/actuator/chaosmonkey
+    admin-base-urls:
+      chaos-poc-demo: http://chaos-poc-demo:8080
+      chaos-poc-downstream: http://chaos-poc-downstream:8081
+    verify-ui-url: http://localhost:18000

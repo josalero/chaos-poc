@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{chaos/fragments :: head('Chaos Relay — Dashboard')}"></head>
+<body>
+<div th:replace="~{chaos/fragments :: header('dashboard')}"></div>
+<main id="main-content">
+  <div th:if="${successMessage}" class="success alert" role="status" th:text="${successMessage}">Success</div>
+  <div th:if="${errors}" class="error alert" role="alert">
+    <p th:each="error : ${errors}" th:text="${error.field()} + ': ' + ${error.message()}">Error</p>
+  </div>
+
+  <h2>Registered services</h2>
+  <p class="page-intro">
+    Use this dashboard to see whether each target accepted the last relay command and what Chaos Monkey reports live.
+    Apply new scenarios from <a th:href="@{/chaos/commands/new}">Publish command</a>, then verify behavior in the
+    <a th:href="${verifyUiUrl}" target="_blank" rel="noopener noreferrer">Verify UI</a>.
+  </p>
+
+  <dl class="legend" aria-label="Column definitions">
+    <div>
+      <dt>Relay state</dt>
+      <dd>Last command aggregate status tracked by this relay (desired vs applied).</dd>
+    </div>
+    <div>
+      <dt>CM</dt>
+      <dd>Live Chaos Monkey enabled flag from the target actuator when reachable.</dd>
+    </div>
+  </dl>
+
+  <div th:if="${#lists.isEmpty(services)}" class="empty-state">
+    <p>No services are registered yet.</p>
+    <p class="muted">Add targets under <code>chaos.relay.allowed-target-applications</code> and matching actuator URLs.</p>
+  </div>
+
+  <div th:unless="${#lists.isEmpty(services)}" class="data-table-wrap" style="margin-top: 0.5rem">
+    <table class="data-table">
+      <caption>Chaos targets registered with this relay</caption>
+      <thead>
+      <tr>
+        <th scope="col">Service</th>
+        <th scope="col">Relay state</th>
+        <th scope="col">CM</th>
+        <th scope="col">Last command</th>
+        <th scope="col">Replicas</th>
+        <th scope="col">Actions</th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr th:each="service : ${services}">
+        <td class="cell-primary" th:text="${service.applicationName()}">chaos-poc-demo</td>
+        <td><span class="badge badge-neutral" th:text="${service.configState()}">DEFAULT</span></td>
+        <td>
+          <span th:if="${service.cmEnabled()}" class="badge badge-on">On</span>
+          <span th:unless="${service.cmEnabled()}" class="badge badge-off">Off</span>
+        </td>
+        <td>
+          <th:block th:replace="~{chaos/fragments-table :: statusBadge(${service.lastCommandStatus()})}"></th:block>
+        </td>
+        <td th:text="${service.eurekaUpCount()} + ' / ' + ${service.expectedInstances()}">1 / 1</td>
+        <td>
+          <div class="table-actions">
+            <a class="btn"
+               th:href="@{/chaos/services/{app}(app=${service.applicationName()})}">
+              <span th:replace="~{chaos/fragments-table :: icon-eye}"></span>
+              Details
+            </a>
+            <form th:action="@{/chaos/services/{app}/disable(app=${service.applicationName()})}" method="post">
+              <input type="hidden" name="issuedBy" value="chaos-console"/>
+              <button type="submit" class="btn" th:aria-label="'Disable Chaos Monkey on ' + ${service.applicationName()}">
+                <span th:replace="~{chaos/fragments-table :: icon-ban}"></span>
+                Disable
+              </button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+</body>
+</html>

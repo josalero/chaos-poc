@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{chaos/fragments :: head(${status.applicationName()} + ' — Service')}"></head>
+<body>
+<div th:replace="~{chaos/fragments :: header('dashboard')}"></div>
+<main id="main-content">
+  <a class="back-link" th:href="@{/chaos}">&larr; Dashboard</a>
+
+  <div class="service-page-header">
+    <h2 th:text="${status.applicationName()}">chaos-poc-demo</h2>
+    <p class="page-intro">
+      Inspect relay state, live Chaos Monkey actuator data, command history, and maintenance actions for this target.
+    </p>
+  </div>
+
+  <div th:if="${errors}" class="error alert" role="alert">
+    <p th:each="error : ${errors}" th:text="${error.field} + ': ' + ${error.message}">error</p>
+  </div>
+
+  <div th:if="${successMessage}" class="success alert" role="status">
+    <p th:text="${successMessage}">Configuration reset complete.</p>
+    <p th:if="${lastCommandId}">
+      Command:
+      <a th:href="@{/chaos/commands/{id}(id=${lastCommandId})}" th:text="${lastCommandId}">id</a>
+    </p>
+  </div>
+
+  <div th:replace="~{chaos/fragments :: serviceTabs(${status.applicationName()}, ${activeTab}, ${#lists.size(commandHistory)})}"></div>
+
+  <section th:if="${activeTab == 'overview'}"
+           class="console-tab-panel"
+           role="tabpanel"
+           id="tabpanel-overview"
+           aria-labelledby="tab-overview">
+    <div class="card">
+      <h3>Service summary</h3>
+      <p class="muted">Relay-tracked state vs live actuator when reachable.</p>
+
+      <dl class="service-metrics">
+        <div class="metric-tile">
+          <dt>Relay state</dt>
+          <dd>
+            <span class="badge badge-neutral" th:text="${status.configState()}">DEFAULT</span>
+          </dd>
+        </div>
+        <div class="metric-tile">
+          <dt>CM (actuator)</dt>
+          <dd>
+            <span th:if="${status.cmEnabled()}" class="badge badge-on">On</span>
+            <span th:unless="${status.cmEnabled()}" class="badge badge-off">Off</span>
+          </dd>
+        </div>
+        <div class="metric-tile">
+          <dt>Replicas</dt>
+          <dd th:text="${status.eurekaUpCount()} + ' / ' + ${status.expectedInstances()}">1 / 1</dd>
+        </div>
+        <div class="metric-tile" th:if="${status.lastCommandId()}">
+          <dt>Last command</dt>
+          <dd>
+            <a th:href="@{/chaos/commands/{id}(id=${status.lastCommandId()})}"
+               th:text="${#strings.abbreviate(status.lastCommandId().toString(), 12)}">id</a>
+            <span class="muted" th:text="'(' + ${status.lastCommandStatus()} + ')'">(APPLIED)</span>
+          </dd>
+        </div>
+      </dl>
+
+      <div class="actions" style="margin-top: 1rem">
+        <a class="btn btn-primary"
+           style="width: auto"
+           th:href="@{/chaos/commands/new(applicationName=${status.applicationName()})}">
+          Configure new assault
+        </a>
+        <a class="btn"
+           style="width: auto"
+           th:href="@{/chaos/services/{app}(app=${status.applicationName()}, tab='actuator')}">
+          View live actuator
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section th:if="${activeTab == 'actuator'}"
+           class="console-tab-panel"
+           role="tabpanel"
+           id="tabpanel-actuator"
+           aria-labelledby="tab-actuator">
+    <div class="card">
+      <h3>Live Chaos Monkey (from service)</h3>
+      <p class="muted">Read from the target service actuator — ground truth on the running pod.</p>
+
+      <div th:if="${!chaosMonkey.configured()}" class="error alert" role="alert">
+        No actuator URL configured for this service (<code>chaos.relay.actuator-base-urls</code>).
+      </div>
+
+      <div th:if="${chaosMonkey.configured() and !chaosMonkey.reachable()}" class="error alert" role="alert">
+        Could not reach Chaos Monkey actuator:
+        <span th:text="${chaosMonkey.errorMessage()}">connection refused</span>
+      </div>
+
+      <div th:if="${chaosMonkey.reachable()}">
+        <p>
+          Enabled:
+          <span th:if="${chaosMonkey.enabled()}" class="badge badge-on">Yes</span>
+          <span th:unless="${chaosMonkey.enabled()}" class="badge badge-off">No</span>
+        </p>
+        <div class="grid">
+          <div>
+            <h4>Status</h4>
+            <pre th:text="${chaosMonkey.statusJson()} ?: '—'">—</pre>
+          </div>
+          <div>
+            <h4>Assaults</h4>
+            <pre th:text="${chaosMonkey.assaultsJson()} ?: '—'">—</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section th:if="${activeTab == 'commands'}"
+           class="console-tab-panel"
+           role="tabpanel"
+           id="tabpanel-commands"
+           aria-labelledby="tab-commands">
+    <div class="card">
+      <h3>Command history</h3>
+      <p class="muted">Commands published through this relay for this service (newest first).</p>
+
+      <div class="data-table-wrap" th:if="${!commandHistory.isEmpty()}" style="margin-top: 0.75rem">
+        <table class="data-table">
+          <thead>
+          <tr>
+            <th scope="col">Published</th>
+            <th scope="col">Action</th>
+            <th scope="col">Status</th>
+            <th scope="col">Issued by</th>
+            <th scope="col">Results</th>
+            <th scope="col">Actions</th>
+          </tr>
+          </thead>
+          <tbody>
+          <tr th:each="entry : ${commandHistory}">
+            <td th:text="${#temporals.format(entry.publishedAt().atZone(T(java.time.ZoneId).systemDefault()), 'MMMM d, yyyy HH:mm')}">
+              July 7, 2026 10:29
+            </td>
+            <td class="cell-mono" th:text="${entry.action()}">CONFIGURE_AND_ENABLE</td>
+            <td th:replace="~{chaos/fragments-table :: statusBadge(${entry.status()})}">APPLIED</td>
+            <td th:text="${entry.issuedBy()} ?: '—'">chaos-console</td>
+            <td th:text="${entry.successCount()} + ' ok / ' + ${entry.failureCount()} + ' failed'">1 ok / 0 failed</td>
+            <td>
+              <div class="table-actions">
+                <a class="btn" th:href="@{/chaos/commands/{id}(id=${entry.commandId()})}">
+                  <span th:replace="~{chaos/fragments-table :: icon-eye}"></span>
+                  Details
+                </a>
+              </div>
+            </td>
+          </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="empty-state" th:if="${commandHistory.isEmpty()}">
+        No commands published yet.
+        <a th:href="@{/chaos/commands/new(applicationName=${status.applicationName()})}">Publish the first command</a>.
+      </p>
+    </div>
+  </section>
+
+  <section th:if="${activeTab == 'maintenance'}"
+           class="console-tab-panel"
+           role="tabpanel"
+           id="tabpanel-maintenance"
+           aria-labelledby="tab-maintenance">
+    <div class="grid">
+      <div class="card">
+        <h3>Relay last command — desired assault</h3>
+        <p class="muted">Assault payload from the most recent relay command.</p>
+        <pre th:text="${desiredAssaultJson} ?: '—'">—</pre>
+      </div>
+      <div class="card">
+        <h3>Relay last command — applied assault</h3>
+        <p class="muted">Recorded when the last command reached APPLIED aggregate status.</p>
+        <pre th:text="${appliedAssaultJson} ?: '—'">—</pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Maintenance actions</h3>
+      <p class="muted">
+        Reset CM disables assaults and waits for APPLIED. Clear demo data resets in-memory orders/inventory via the service admin endpoint (per service only).
+      </p>
+
+      <div class="maintenance-actions">
+        <form th:action="@{/chaos/services/{app}/disable(app=${status.applicationName()})}" method="post">
+          <input type="hidden" name="issuedBy" value="chaos-console"/>
+          <button type="submit" class="btn">
+            <span th:replace="~{chaos/fragments-table :: icon-ban}"></span>
+            Disable
+          </button>
+        </form>
+        <form th:action="@{/chaos/services/{app}/reset(app=${status.applicationName()})}"
+              method="post"
+              onsubmit="return confirm('Reset Chaos Monkey configuration on this service? Assaults will be disabled.');">
+          <input type="hidden" name="issuedBy" value="chaos-console"/>
+          <button type="submit" class="btn btn-danger">
+            <span th:replace="~{chaos/fragments-table :: icon-rotate}"></span>
+            Reset CM configuration
+          </button>
+        </form>
+        <form th:action="@{/chaos/services/{app}/clear-demo-data(app=${status.applicationName()})}"
+              method="post"
+              onsubmit="return confirm('Clear in-memory demo orders and inventory for this service?');">
+          <button type="submit" class="btn">
+            Clear demo data
+          </button>
+        </form>
+        <a class="btn btn-primary"
+           th:href="@{/chaos/commands/new(applicationName=${status.applicationName()})}">
+          Configure new assault
+        </a>
+      </div>
+
+      <div class="maintenance-form-card">
+        <h4>Enable Chaos Monkey</h4>
+        <p class="muted">Publish an enable command with an optional expiry.</p>
+        <form th:action="@{/chaos/services/{app}/enable(app=${status.applicationName()})}" method="post">
+          <label for="expires-at">Expires at (ISO-8601)</label>
+          <input id="expires-at" name="expiresAt" th:value="${maintenanceForm.expiresAt}"/>
+          <input type="hidden" name="issuedBy" value="chaos-console"/>
+          <button type="submit" class="btn btn-primary" style="width: auto">Enable</button>
+        </form>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

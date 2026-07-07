@@ -1,0 +1,10 @@
+samba:
+  chaos:
+    command-listener:
+      pod-name: ${HOSTNAME:chaos-poc-demo}
+      actuator-base-url: http://127.0.0.1:8080/actuator/chaosmonkey
+      rabbitmq:
+        host: rabbitmq
+    demo:
+      inventory:
+        base-url: http://chaos-poc-downstream:8081

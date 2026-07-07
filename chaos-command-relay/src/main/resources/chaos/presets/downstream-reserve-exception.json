@@ -1,0 +1,25 @@
+{
+  "environment": "test",
+  "targetApplication": "chaos-poc-downstream",
+  "action": "CONFIGURE_AND_ENABLE",
+  "issuedBy": "poc-operator",
+  "correlationId": "scenario-downstream-reserve-exception",
+  "expiresAt": "2026-12-31T23:59:59Z",
+  "assault": {
+    "level": 1,
+    "deterministic": true,
+    "latencyActive": false,
+    "exceptionsActive": true,
+    "watchedCustomServices": ["com.samba.chaos.downstream.service.InventoryService.reserve"],
+    "exception": {
+      "type": "java.lang.RuntimeException",
+      "method": "<init>",
+      "arguments": [
+        {
+          "type": "java.lang.String",
+          "value": "Injected reserve failure"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "environment": "test",
+  "targetApplication": "chaos-poc-demo",
+  "action": "CONFIGURE_AND_ENABLE",
+  "issuedBy": "docker-compose-poc",
+  "correlationId": "poc-bean-interceptor",
+  "expiresAt": "2026-12-31T23:59:59Z",
+  "assault": {
+    "level": 1,
+    "exceptionsActive": true,
+    "watchedCustomServices": ["OrderService.placeOrder"]
+  }
+}

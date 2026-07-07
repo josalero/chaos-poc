@@ -1,0 +1,7 @@
+{
+  "environment": "test",
+  "targetApplication": "chaos-poc-demo",
+  "action": "DISABLE",
+  "issuedBy": "poc-operator",
+  "correlationId": "scenario-disable"
+}
