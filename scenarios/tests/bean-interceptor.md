@@ -38,7 +38,7 @@ This test does not depend on prior runs or **Apply history**.
 |------|--------|-----------------|
 | 1 | **Setup** — click **Reset configuration** (header). | **Chaos Monkey state** → **Disabled**. Scenario selection cleared. |
 | 2 | In **Demo API playground** → **Happy paths**, click **Create order**. | **Recent responses** shows **HTTP 201** (baseline within this test). |
-| 3 | In **Scenarios** → **Method target**, check **Bean interceptor** only. Click **Apply 1 scenario**. | Latest **Apply history** row reaches **APPLIED**. **Payload preview** shows FQN `com.samba.chaos.demo.service.OrderService.placeOrder` and `RuntimeException`. |
+| 3 | In **Scenarios** → **Method target**, check **Bean interceptor** only. Click **Apply 1 scenario**. | Latest **Apply history** row reaches **APPLIED**. **Payload preview** shows the fully qualified `OrderService.placeOrder` target and `RuntimeException`. |
 | 4 | Review **Chaos Monkey state**. | **Enabled**. **Exception assault** **Active**. **Watched methods** includes `OrderService.placeOrder`. |
 | 5 | Click **Create order** again. | **Recent responses** shows non-success (not HTTP 201). |
 | 6 | **Teardown** — click **Reset configuration**. | **Chaos Monkey state** → **Disabled**. **Create order** returns **HTTP 201**. |

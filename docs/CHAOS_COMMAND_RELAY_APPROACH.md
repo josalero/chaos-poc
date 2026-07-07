@@ -3,16 +3,17 @@
 **Status:** Draft  
 **Document type:** High-level architecture / design approach  
 **Audience:** Platform engineers, SREs, and chaos-engineering stakeholders  
-**Related work:** DSU-1671 Plan A  
-**Repository:** [chaos-poc](../README.md)
+**Repository:** [chaos-poc](../README.md) — run instructions, URLs, and scenario index
+
+**Companion doc:** This file is the **design reference**. Use [README.md](../README.md) for Docker Compose, CLI, UI, and day-to-day operation.
 
 ---
 
 ## Executive summary
 
-The Chaos Command Relay POC validates a **centralized chaos control plane** for SambaSafety microservices. Operators submit structured commands to a relay service; the relay fans out over RabbitMQ; each target pod applies Chaos Monkey configuration via **loopback** Spring Boot Actuator; and the relay aggregates per-instance outcomes into a pollable command status.
+The Chaos Command Relay POC validates a **centralized chaos control plane** for microservices. Operators submit structured commands to a relay service; the relay fans out over RabbitMQ; each target pod applies Chaos Monkey configuration via **loopback** Spring Boot Actuator; and the relay aggregates per-instance outcomes into a pollable command status.
 
-This document describes architecture, message contracts, configuration, and verification workflow. It distinguishes **validated POC patterns** from **production gaps** (auth, persistence, service discovery) so readers can plan DSU-1671 rollout without mistaking demo shortcuts for platform requirements.
+This document describes architecture, message contracts, configuration, and verification workflow. It distinguishes **validated POC patterns** from **production gaps** (auth, persistence, service discovery) so readers can plan production rollout without mistaking demo shortcuts for platform requirements.
 
 ---
 
@@ -32,7 +33,7 @@ This document describes architecture, message contracts, configuration, and veri
 
 | ID | Non-goal | Production follow-up |
 | --- | --- | --- |
-| NG-1 | Okta / admin RBAC on relay APIs | DSU-1671 Plan A auth model |
+| NG-1 | Okta / admin RBAC on relay APIs | IdP-backed admin RBAC on relay APIs |
 | NG-2 | Durable command history (Postgres) | Replace in-memory `ConcurrentHashMap` store |
 | NG-3 | Eureka or Kubernetes-based replica counting | `ExpectedInstancesResolver` static fallback today |
 | NG-4 | Kubernetes deployment / multi-cluster fanout | Local Docker Compose only |
@@ -169,9 +170,9 @@ The repository is a Maven multi-module project (Java 17, Spring Boot 3.0.9, Spri
 
 ```
 chaos-poc/
-├── chaos-listener-lib/     # com.samba.chaos.listener.*
-├── chaos-command-relay/    # com.samba.chaos.relay.*
-├── chaos-poc-demo/         # com.samba.chaos.demo.*
+├── chaos-listener-lib/     # listener auto-config, message DTOs, actuator client
+├── chaos-command-relay/    # relay API, store, operator console
+├── chaos-poc-demo/         # demo target app + Feign gateways
 ├── chaos-poc-downstream/
 ├── chaos-poc-ui/
 ├── scenarios/              # JSON command payloads + manual test specs
@@ -216,7 +217,7 @@ Example payload (`scenarios/bean-interceptor.json`):
     "latencyActive": false,
     "exceptionsActive": true,
     "watchedCustomServices": [
-      "com.samba.chaos.demo.service.OrderService.placeOrder"
+      "…demo.service.OrderService.placeOrder"
     ],
     "exception": {
       "type": "java.lang.RuntimeException",
@@ -250,7 +251,7 @@ Published by each pod to queue `chaos.command-results`.
 |-------|-------------|
 | `commandId` | Correlates to the original command |
 | `targetApplication` | Echo from message |
-| `podName` | From `samba.chaos.command-listener.pod-name` (e.g. `HOSTNAME`) |
+| `podName` | From `chaos.command-listener.pod-name` (e.g. `HOSTNAME`) |
 | `outcome` | `SUCCESS` or `ACTUATOR_ERROR` |
 | `failedStep` | Actuator path that failed (`assaults`, `enable`, `disable`) |
 | `httpStatus` | HTTP status from failed actuator call |
@@ -278,12 +279,12 @@ The relay computes command-level status from expected vs. reported instances:
 Auto-configuration loads when **all** of the following hold:
 
 - Spring profile includes `test` or `chaos-monkey`
-- `samba.chaos.command-listener.enabled=true`
+- `chaos.command-listener.enabled=true`
 
 ```java
 @AutoConfiguration
 @Profile({"test", "chaos-monkey"})
-@ConditionalOnProperty(prefix = "samba.chaos.command-listener", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "chaos.command-listener", name = "enabled", havingValue = "true")
 ```
 
 Production services would gate the listener behind the `test` profile (or a dedicated chaos profile) so assault machinery never activates in production profiles.
@@ -295,7 +296,7 @@ Each pod creates a **non-durable, exclusive, auto-delete queue** bound to the fa
 ```java
 @RabbitListener(bindings = @QueueBinding(
     value = @Queue(value = "", durable = "false", exclusive = "true", autoDelete = "true"),
-    exchange = @Exchange(name = "${samba.chaos.command-listener.commands-exchange}", type = "fanout")))
+    exchange = @Exchange(name = "${chaos.command-listener.commands-exchange}", type = "fanout")))
 ```
 
 This pattern gives every replica an independent subscription without pre-provisioning queue names in the relay.
@@ -304,7 +305,7 @@ This pattern gives every replica an independent subscription without pre-provisi
 
 Before applying, the listener checks:
 
-1. `message.environment` equals local `samba.chaos.command-listener.environment` (default `test`)
+1. `message.environment` equals local `chaos.command-listener.environment` (default `test`)
 2. `message.targetApplication` equals local application name (defaults from `spring.application.name`)
 3. `expiresAt` is null or still in the future
 4. `commandId` has not been processed on this pod (in-memory dedupe set)
@@ -328,9 +329,9 @@ Transient actuator failures (503, 504, connection errors) trigger Spring Retry w
 
 `ChaosListenerEnvironmentPostProcessor` runs at bootstrap to:
 
-- Mirror legacy property prefixes (`chaos.listener.*`, `chaos.command-listener.*`) to canonical `samba.chaos.command-listener.*`
+- Mirror legacy property prefixes (`chaos.listener.*`, `chaos.command-listener.*`) at startup so either prefix works in target YAML
 - Default `application-name` from `spring.application.name`
-- Bridge `samba.chaos.command-listener.rabbitmq.*` into `spring.rabbitmq.*` when Spring Rabbit properties are absent
+- Bridge `chaos.command-listener.rabbitmq.*` into `spring.rabbitmq.*` when Spring Rabbit properties are absent
 
 This lets host services configure chaos in service-owned YAML without duplicating Spring AMQP blocks.
 
@@ -363,14 +364,14 @@ Both sides use `Jackson2JsonMessageConverter` with shared `ChaosJsonMapper` for 
 
 ### 6.3 Instance Count Resolution
 
-`ExpectedInstancesResolver` uses a static fallback map (`chaos.relay.expected-instances-fallback`) in the POC. Production Plan A would integrate Eureka or Kubernetes endpoints to count live replicas. Timeout semantics depend on this count: if expected is 3 but only 2 pods report success within the window, status becomes `TIMED_OUT` or `PARTIAL`.
+`ExpectedInstancesResolver` uses a static fallback map (`chaos.relay.expected-instances-fallback`) in the POC. Production deployments would integrate Eureka or Kubernetes endpoints to count live replicas. Timeout semantics depend on this count: if expected is 3 but only 2 pods report success within the window, status becomes `TIMED_OUT` or `PARTIAL`.
 
 ### 6.4 Operator Console
 
 Server-rendered Thymeleaf UI at `/chaos` provides:
 
 - Service dashboard with CM state from **direct actuator probe** (`ChaosMonkeyActuatorProbe`)
-- Scenario presets mapped to JSON payloads (DSUI reference commands + downstream variants)
+- Scenario presets mapped to JSON payloads (reference commands + downstream variants)
 - Per-service command history from the in-memory store
 - **Reset CM configuration** (DISABLE command, wait for APPLIED) vs. **Clear demo data** (admin POST) — intentionally split
 - **Reset all CM** on dashboard — disables assaults on every allowlisted target without clearing demo data
@@ -483,19 +484,16 @@ spring:
   profiles:
     active: test,chaos-monkey   # listener + CM profile
 
-samba:
-  chaos:
-    command-listener:
-      enabled: true
-      pod-name: ${HOSTNAME:local}
-      actuator-base-url: http://127.0.0.1:8080/actuator/chaosmonkey
-      rabbitmq:
-        host: ${RABBITMQ_HOST:localhost}
-        port: 5672
-        username: ${RABBITMQ_USER}
-        password: ${RABBITMQ_PASSWORD}
-
 chaos:
+  command-listener:
+    enabled: true
+    pod-name: ${HOSTNAME:local}
+    actuator-base-url: http://127.0.0.1:8080/actuator/chaosmonkey
+    rabbitmq:
+      host: ${RABBITMQ_HOST:localhost}
+      port: 5672
+      username: ${RABBITMQ_USER}
+      password: ${RABBITMQ_PASSWORD}
   monkey:
     enabled: false              # CM off until command ENABLE
     watcher:
@@ -526,13 +524,13 @@ Add the service's `spring.application.name` to the relay allowlist.
 
 | Property | Default |
 |----------|---------|
-| `samba.chaos.command-listener.environment` | `test` |
-| `samba.chaos.command-listener.commands-exchange` | `chaos.commands.test` |
-| `samba.chaos.command-listener.results-queue` | `chaos.command-results` |
-| `samba.chaos.command-listener.max-apply-attempts` | `3` |
-| `samba.chaos.command-listener.apply-backoff-ms` | `200` |
-| `samba.chaos.command-listener.max-publish-attempts` | `3` |
-| `samba.chaos.command-listener.publish-backoff-ms` | `100` |
+| `chaos.command-listener.environment` | `test` |
+| `chaos.command-listener.commands-exchange` | `chaos.commands.test` |
+| `chaos.command-listener.results-queue` | `chaos.command-results` |
+| `chaos.command-listener.max-apply-attempts` | `3` |
+| `chaos.command-listener.apply-backoff-ms` | `200` |
+| `chaos.command-listener.max-publish-attempts` | `3` |
+| `chaos.command-listener.publish-backoff-ms` | `100` |
 
 ---
 
@@ -594,11 +592,11 @@ The script runs each scenario in isolation with disable/reset bookends and asser
 
 ---
 
-## 12. Plan A Alignment (DSU-1671)
+## 12. Production alignment
 
-| Production concept (Plan A) | POC implementation |
+| Production concept | POC implementation |
 |----------------------------|-------------------|
-| Service-owned listener flag | `samba.chaos.command-listener.enabled` in target YAML |
+| Service-owned listener flag | `chaos.command-listener.enabled` in target YAML |
 | Profile-gated listener | `@Profile("test")` on auto-configuration |
 | Relay command store | In-memory `ConcurrentHashMap` |
 | Dashboard CM column | Actuator probe primary |
@@ -709,9 +707,9 @@ The Chaos Command Relay POC validates a **bus-mediated, actuator-driven chaos co
 | **Fault injection** | Chaos Monkey remains the engine; the relay orchestrates its REST API at scale |
 | **Verification** | Console controls assaults; verify UI observes runtime behaviour and SLO impact |
 
-The architecture decouples chaos orchestration from application business logic, produces auditable command records (ready for durable storage), and supports multi-instance aggregation — the core requirements for safe, repeatable chaos engineering on the SambaSafety platform.
+The architecture decouples chaos orchestration from application business logic, produces auditable command records (ready for durable storage), and supports multi-instance aggregation — the core requirements for safe, repeatable chaos engineering at platform scale.
 
-**Next steps:** resolve open questions above, implement DSU-1671 Plan A production gaps (auth, persistence, discovery), and pilot on a non-production namespace before broad rollout.
+**Next steps:** resolve open questions above, implement production gaps (auth, persistence, discovery), and pilot on a non-production namespace before broad rollout.
 
 ---
 
@@ -720,4 +718,4 @@ The architecture decouples chaos orchestration from application business logic, 
 | Date | Summary |
 | --- | --- |
 | 2026-07-07 | Restructured per technical-documentation-authoring: metadata, goals/non-goals, acceptance criteria, open questions, diagram captions |
-| (prior) | Initial architecture draft aligned to DSU-1671 Plan A and chaos-poc implementation |
+| (prior) | Initial architecture draft aligned to chaos-poc implementation |
