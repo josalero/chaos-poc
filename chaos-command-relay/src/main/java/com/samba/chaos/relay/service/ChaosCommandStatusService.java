@@ -95,7 +95,9 @@ public class ChaosCommandStatusService {
         record.issuedBy(),
         record.expiresAt(),
         record.assault(),
-        record.instances());
+        record.instances(),
+        record.instanceSelection(),
+        record.instanceIds());
   }
 
   /**

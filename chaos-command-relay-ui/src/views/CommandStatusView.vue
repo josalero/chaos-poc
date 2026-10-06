@@ -15,6 +15,9 @@ const waiting = computed(
 );
 const headline = computed(() => {
   if (!status.value) return 'Loading patch…';
+  if (status.value.status === 'APPLIED' && status.value.instanceSelection === 'SOME') {
+    return 'Patch applied to selected replicas';
+  }
   if (status.value.status === 'APPLIED') return 'Patch applied';
   if (status.value.status === 'FAILED' || status.value.status === 'TIMED_OUT') return 'Patch failed';
   return 'Waiting for replicas…';
@@ -58,7 +61,8 @@ onUnmounted(stopPolling);
     <div>
       <p class="text-xs font-semibold tracking-widest text-orange-800">PATCH STATUS</p>
       <h1 class="text-3xl font-semibold">{{ headline }}</h1>
-      <p v-if="status?.status === 'APPLIED'" class="mt-2 text-stone-600">All expected replicas reported success. Open Verify UI and place orders.</p>
+      <p v-if="status?.status === 'APPLIED' && status?.instanceSelection === 'SOME'" class="mt-2 text-stone-600">Only the selected replicas were changed. The others keep their current assault.</p>
+      <p v-else-if="status?.status === 'APPLIED'" class="mt-2 text-stone-600">All expected replicas reported success. Open Verify UI and place orders.</p>
       <p v-else-if="status?.status === 'FAILED' || status?.status === 'TIMED_OUT'" class="mt-2 text-stone-600">Something went wrong. Check pod results or try another scenario.</p>
       <p v-else-if="waiting" class="mt-2 text-stone-600">Refreshing every 2 seconds until Applied or Failed.</p>
     </div>
@@ -70,6 +74,10 @@ onUnmounted(stopPolling);
       <div><dt class="text-sm text-stone-500">Target</dt><dd>{{ status.targetApplication }}</dd></div>
       <div><dt class="text-sm text-stone-500">Replicas</dt><dd>{{ status.successCount }} / {{ status.expectedInstances }}</dd></div>
       <div><dt class="text-sm text-stone-500">Action</dt><dd class="mono">{{ status.action }}</dd></div>
+      <div>
+        <dt class="text-sm text-stone-500">Scope</dt>
+        <dd class="mono">{{ status.instanceSelection || 'ALL' }}<span v-if="status.instanceIds?.length"> · {{ status.instanceIds.join(', ') }}</span></dd>
+      </div>
     </dl>
   </section>
 

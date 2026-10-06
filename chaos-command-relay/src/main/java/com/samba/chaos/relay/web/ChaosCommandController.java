@@ -47,7 +47,7 @@ public class ChaosCommandController {
   }
 
   /**
-   * Validates the body, stores the command, and fans out to every UP instance.
+   * Validates the body, stores the command, and fans out to the selected UP instances.
    *
    * @param request command to publish; {@code commandId} may be omitted
    * @return 202 when published, 400 when rejected, 503 when discovery has no UP instances

@@ -3,12 +3,16 @@ package com.samba.chaos.relay.service;
 import com.samba.chaos.relay.model.ChaosCommandRequest;
 import com.samba.chaos.relay.model.ChaosCommandStatusResponse;
 import com.samba.chaos.relay.model.ChaosCommandSubmitResponse;
+import com.samba.chaos.relay.model.InstanceSelection;
 import com.samba.chaos.relay.model.ValidationErrorResponse;
 import com.samba.chaos.relay.model.ValidationErrorResponse.FieldError;
 import com.samba.chaos.relay.store.ChaosCommandStore;
 import com.samba.chaos.relay.store.CommandRecord;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.cloud.client.ServiceInstance;
@@ -52,13 +56,13 @@ public class ChaosCommandService {
   }
 
   /**
-   * Publishes one command to every UP instance of {@code targetApplication}.
+   * Publishes one command to the selected UP instances of {@code targetApplication}.
    *
    * <pre>
-   * submit(disable chaos-poc-demo)
-   *   -&gt; Accepted, expectedInstances = 2
-   * submit(target not on the allowlist)
-   *   -&gt; Rejected, field targetApplication
+   * submit(disable chaos-poc-demo)          -&gt; Accepted, expectedInstances = 2
+   * submit(SOME, instanceIds = [pod-a])     -&gt; Accepted, expectedInstances = 1
+   * submit(SOME, instanceIds = [missing])   -&gt; Rejected, field instanceIds
+   * submit(target not on the allowlist)     -&gt; Rejected, field targetApplication
    * submit(allowlisted app with no UP instances)
    *   -&gt; Unavailable, status NO_INSTANCES
    * </pre>
@@ -72,8 +76,8 @@ public class ChaosCommandService {
       return SubmitResult.rejected(validator.toErrorResponse(errors));
     }
 
-    List<ServiceInstance> instances = instancesResolver.resolveUp(request.targetApplication());
-    if (instances.isEmpty()) {
+    List<ServiceInstance> up = instancesResolver.resolveUp(request.targetApplication());
+    if (up.isEmpty()) {
       return SubmitResult.unavailable(
           new ValidationErrorResponse(
               "NO_INSTANCES",
@@ -81,15 +85,57 @@ public class ChaosCommandService {
                   new FieldError("targetApplication", "no UP instances registered in discovery"))));
     }
 
+    List<ServiceInstance> targets = selectTargets(request, up);
+    if (targets == null) {
+      return SubmitResult.rejected(
+          new ValidationErrorResponse(
+              "REJECTED",
+              List.of(
+                  new FieldError(
+                      "instanceIds", "one or more instance ids are not UP in discovery"))));
+    }
+
     UUID commandId = request.commandId() != null ? request.commandId() : UUID.randomUUID();
-    CommandRecord record = newRecord(request, commandId, instances.size());
+    CommandRecord record = newRecord(request, commandId, targets.size());
     commandStore.save(record);
-    dispatcher.dispatch(validator.toMessage(request, commandId), instances);
+    dispatcher.dispatch(validator.toMessage(request, commandId), targets);
     return SubmitResult.accepted(statusService.toSubmitResponse(record));
+  }
+
+  /**
+   * UP instances that should receive the command. Null means a SOME id is not UP.
+   *
+   * @param request accepted command
+   * @param up current UP instances
+   * @return selected instances, or null when a requested id is missing
+   */
+  private static List<ServiceInstance> selectTargets(
+      ChaosCommandRequest request, List<ServiceInstance> up) {
+    if (request.instanceSelection() != InstanceSelection.SOME) {
+      return up;
+    }
+
+    Map<String, ServiceInstance> byId = new LinkedHashMap<>();
+    for (ServiceInstance instance : up) {
+      byId.put(instance.getInstanceId(), instance);
+    }
+    List<ServiceInstance> selected = new ArrayList<>();
+    for (String instanceId : request.instanceIds()) {
+      ServiceInstance match = byId.get(instanceId);
+      if (match == null) {
+        return null;
+      }
+      selected.add(match);
+    }
+    return selected;
   }
 
   private static CommandRecord newRecord(
       ChaosCommandRequest request, UUID commandId, int expectedInstances) {
+    InstanceSelection selection =
+        request.instanceSelection() == null ? InstanceSelection.ALL : request.instanceSelection();
+    List<String> instanceIds =
+        selection == InstanceSelection.SOME ? List.copyOf(request.instanceIds()) : List.of();
     return new CommandRecord(
         commandId,
         request.action(),
@@ -100,7 +146,9 @@ public class ChaosCommandService {
         request.issuedBy(),
         request.expiresAt(),
         request.assault(),
-        List.of());
+        List.of(),
+        selection,
+        instanceIds);
   }
 
   /**

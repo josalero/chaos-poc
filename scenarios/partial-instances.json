@@ -1,0 +1,19 @@
+{
+  "environment": "test",
+  "targetApplication": "chaos-poc-demo",
+  "action": "CONFIGURE_AND_ENABLE",
+  "issuedBy": "poc-operator",
+  "correlationId": "scenario-partial-instances",
+  "expiresAt": "2026-12-31T23:59:59Z",
+  "instanceSelection": "SOME",
+  "instanceIds": ["REPLACE_WITH_ONE_UP_INSTANCE_ID"],
+  "assault": {
+    "level": 1,
+    "deterministic": true,
+    "latencyActive": true,
+    "latencyRangeStart": 100,
+    "latencyRangeEnd": 400,
+    "exceptionsActive": false,
+    "watchedCustomServices": ["com.samba.chaos.demo.web.OrderController.create"]
+  }
+}

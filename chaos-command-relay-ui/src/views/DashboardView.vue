@@ -1,10 +1,10 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { consoleActor, disableService, listServices, submitCommand } from '../api/relayClient.js';
+import { consoleActor, disableService, getHistory, listServices, submitCommand } from '../api/relayClient.js';
 import Notices from '../components/Notices.vue';
 import StatusBadge from '../components/StatusBadge.vue';
-import { commandFromPreset } from '../lib/commands.js';
+import { commandFromPreset, commandRequestJson } from '../lib/commands.js';
 import { errorMessages } from '../lib/errors.js';
 import { serviceTitle } from '../lib/labels.js';
 import { showErrors } from '../lib/notices.js';
@@ -12,6 +12,7 @@ import { presets } from '../presets/catalog.js';
 
 const router = useRouter();
 const services = ref([]);
+const historyByService = ref({});
 const loading = ref(true);
 const loadError = ref('');
 const target = ref(presets[0]?.targetApplication || '');
@@ -30,6 +31,12 @@ const selected = computed(() => scenarios.value.find((preset) => preset.id === s
 onMounted(async () => {
   try {
     services.value = await listServices();
+    const histories = await Promise.all(
+      services.value.map((service) => getHistory(service.applicationName).catch(() => [])),
+    );
+    historyByService.value = Object.fromEntries(
+      services.value.map((service, index) => [service.applicationName, histories[index]]),
+    );
     if (!target.value && services.value[0]) {
       target.value = services.value[0].applicationName;
     }
@@ -39,6 +46,11 @@ onMounted(async () => {
     loading.value = false;
   }
 });
+
+function latestRequest(service) {
+  const latest = historyByService.value[service.applicationName]?.[0];
+  return latest ? commandRequestJson(latest) : '';
+}
 
 function onTargetChange() {
   scenarioId.value = '';
@@ -119,6 +131,11 @@ async function turnOff(applicationName) {
             </div>
           </details>
         </div>
+        <details v-if="latestRequest(service)" open class="mt-3">
+          <summary class="cursor-pointer text-sm font-medium">Last request JSON</summary>
+          <pre class="mono mt-2 max-h-48 overflow-auto rounded-lg bg-stone-900 p-3 text-xs text-stone-100">{{ latestRequest(service) }}</pre>
+        </details>
+        <p v-else class="mt-3 text-sm text-stone-500">No request has been applied yet.</p>
         <dl class="mt-3 grid grid-cols-3 gap-2 text-sm">
           <div><dt class="text-stone-500">CM</dt><dd :class="service.cmEnabled ? 'font-semibold text-orange-800' : 'text-emerald-800'">{{ service.cmEnabled ? 'ON' : 'OFF' }}</dd></div>
           <div><dt class="text-stone-500">Replicas</dt><dd>{{ service.eurekaUpCount }}/{{ service.expectedInstances }}</dd></div>

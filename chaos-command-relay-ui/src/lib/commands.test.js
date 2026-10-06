@@ -1,5 +1,49 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { commandFromForm, commandFromPreset } from './commands.js';
+import { commandFromForm, commandFromPreset, commandRequestJson } from './commands.js';
+
+describe('commandRequestJson', () => {
+  it('rebuilds an ALL command and omits instance ids', () => {
+    const json = commandRequestJson({
+      commandId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+      targetApplication: 'chaos-poc-demo',
+      action: 'DISABLE',
+      assault: null,
+      expiresAt: null,
+      issuedBy: 'chaos-console',
+      correlationId: 'quick-disable',
+      instanceSelection: 'ALL',
+    });
+
+    expect(JSON.parse(json)).toEqual({
+      commandId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+      environment: 'test',
+      targetApplication: 'chaos-poc-demo',
+      action: 'DISABLE',
+      assault: null,
+      expiresAt: null,
+      issuedBy: 'chaos-console',
+      correlationId: 'quick-disable',
+      instanceSelection: 'ALL',
+    });
+  });
+
+  it('includes instance ids when the command targeted SOME', () => {
+    const json = commandRequestJson({
+      commandId: 'abc',
+      targetApplication: 'chaos-poc-demo',
+      action: 'CONFIGURE_AND_ENABLE',
+      assault: { level: 1 },
+      expiresAt: '2026-10-06T18:00:00Z',
+      issuedBy: 'chaos-console',
+      correlationId: null,
+      instanceSelection: 'SOME',
+      instanceIds: ['pod-a'],
+    });
+
+    expect(JSON.parse(json).instanceIds).toEqual(['pod-a']);
+    expect(JSON.parse(json).instanceSelection).toBe('SOME');
+  });
+});
 
 describe('commandFromPreset', () => {
   beforeEach(() => {
@@ -63,6 +107,26 @@ describe('commandFromForm', () => {
     expect(command.correlationId).toBeNull();
     expect(command.expiresAt).toBeNull();
     expect(command.environment).toBe('test');
+    expect(command.instanceSelection).toBe('ALL');
+    expect(command.instanceIds).toBeUndefined();
+  });
+
+  it('keeps the selected instance ids when the scope is SOME', () => {
+    const command = commandFromForm({
+      targetApplication: 'chaos-poc-demo',
+      action: 'CONFIGURE_AND_ENABLE',
+      issuedBy: 'chaos-console',
+      correlationId: '',
+      expiresAt: '2026-10-06T18:00:00Z',
+      assaultJson: '',
+      preset: { assault: { level: 1, latencyActive: true } },
+      instanceSelection: 'SOME',
+      instanceIds: ['pod-a'],
+    });
+
+    expect(command.instanceSelection).toBe('SOME');
+    expect(command.instanceIds).toEqual(['pod-a']);
+    expect(command.assault).toEqual({ level: 1, latencyActive: true });
   });
 
   it('drops the assault when the action is DISABLE', () => {

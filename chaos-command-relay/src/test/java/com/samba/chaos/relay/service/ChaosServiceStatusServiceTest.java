@@ -19,6 +19,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.cloud.client.DefaultServiceInstance;
 
 class ChaosServiceStatusServiceTest {
 
@@ -69,6 +70,20 @@ class ChaosServiceStatusServiceTest {
               assertThat(summary.cmEnabled()).isFalse();
             });
     assertThat(service.getHistory("orders")).contains(List.of());
+    assertThat(service.getService("orders").orElseThrow().upInstanceIds()).isEmpty();
+  }
+
+  @Test
+  void listsDiscoveryInstanceIds() {
+    when(instancesResolver.resolveUp("orders"))
+        .thenReturn(
+            List.of(
+                new DefaultServiceInstance("pod-a", "orders", "10.0.0.1", 8080, false),
+                new DefaultServiceInstance("pod-b", "orders", "10.0.0.2", 8080, false)));
+    when(store.findLatestByApplication("orders")).thenReturn(Optional.empty());
+
+    assertThat(service.getService("orders").orElseThrow().upInstanceIds())
+        .containsExactly("pod-a", "pod-b");
   }
 
   @Test

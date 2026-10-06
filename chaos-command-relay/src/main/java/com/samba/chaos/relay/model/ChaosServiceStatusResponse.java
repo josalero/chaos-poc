@@ -3,13 +3,15 @@ package com.samba.chaos.relay.model;
 import com.samba.chaos.command.ChaosAssaultConfig;
 import com.samba.chaos.command.ChaosCommandAction;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
  * Relay view of one allowlisted service and its latest command.
  *
  * <p>{@code cmEnabled} is the live actuator flag when an instance answers. Otherwise it is derived
- * from the latest APPLIED enable or configure-and-enable command.
+ * from the latest APPLIED enable or configure-and-enable command. {@code upInstanceIds} are the
+ * discovery ids a SOME command can name.
  */
 public record ChaosServiceStatusResponse(
     String applicationName,
@@ -25,4 +27,5 @@ public record ChaosServiceStatusResponse(
     int eurekaUpCount,
     int expectedInstances,
     ChaosAssaultConfig desiredAssault,
-    ChaosAssaultConfig appliedAssault) {}
+    ChaosAssaultConfig appliedAssault,
+    List<String> upInstanceIds) {}

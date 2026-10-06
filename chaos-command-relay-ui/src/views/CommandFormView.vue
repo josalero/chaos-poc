@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { submitCommand } from '../api/relayClient.js';
+import { getService, submitCommand } from '../api/relayClient.js';
 import Notices from '../components/Notices.vue';
 import { commandFromForm, leaseExpiresAt } from '../lib/commands.js';
 import { errorMessages } from '../lib/errors.js';
@@ -23,7 +23,10 @@ const form = ref({
   expiresAt: leaseExpiresAt(),
   presetId: '',
   assaultJson: '',
+  instanceSelection: route.query.instanceSelection === 'SOME' ? 'SOME' : 'ALL',
+  instanceIds: [],
 });
+const upInstanceIds = ref([]);
 
 const selectedPreset = computed(() => presets.find((preset) => preset.id === form.value.presetId) || null);
 
@@ -33,8 +36,30 @@ watch(selectedPreset, (preset) => {
   form.value.targetApplication = preset.targetApplication;
 });
 
+watch(
+  () => form.value.targetApplication,
+  async (applicationName) => {
+    form.value.instanceIds = [];
+    if (!applicationName) {
+      upInstanceIds.value = [];
+      return;
+    }
+    try {
+      const service = await getService(applicationName);
+      upInstanceIds.value = service.upInstanceIds || [];
+    } catch {
+      upInstanceIds.value = [];
+    }
+  },
+  { immediate: true },
+);
+
 async function publish() {
   parseError.value = '';
+  if (form.value.instanceSelection === 'SOME' && form.value.instanceIds.length === 0) {
+    parseError.value = 'Select at least one instance.';
+    return;
+  }
   let command;
   try {
     command = commandFromForm({ ...form.value, preset: selectedPreset.value });
@@ -71,6 +96,20 @@ async function publish() {
           <option v-for="target in targets" :key="target" :value="target">{{ target }}</option>
         </select>
       </label>
+      <fieldset class="text-sm font-medium">
+        <legend>Instances</legend>
+        <div class="mt-1 flex gap-4 font-normal">
+          <label><input v-model="form.instanceSelection" type="radio" value="ALL" /> All UP instances</label>
+          <label><input v-model="form.instanceSelection" type="radio" value="SOME" /> Some instances</label>
+        </div>
+        <div v-if="form.instanceSelection === 'SOME'" class="mt-2 grid gap-1 font-normal">
+          <p v-if="!upInstanceIds.length" class="text-stone-500">No UP instances are registered for this target.</p>
+          <label v-for="instanceId in upInstanceIds" :key="instanceId" class="font-mono text-xs">
+            <input v-model="form.instanceIds" type="checkbox" :value="instanceId" />
+            {{ instanceId }}
+          </label>
+        </div>
+      </fieldset>
       <label class="text-sm font-medium" for="action">Action
         <select id="action" v-model="form.action" required class="mt-1 w-full rounded-md border border-stone-300 px-3 py-2">
           <option v-for="action in actions" :key="action" :value="action">{{ action }}</option>

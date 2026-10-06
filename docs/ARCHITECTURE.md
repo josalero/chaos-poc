@@ -68,7 +68,7 @@ Runtime settings live in `config-repo/` and are served by the config server. ngi
 | Push, then store the HTTP result | The relay POSTs the command. The response body is that instance's `ChaosCommandResult`. There is no broker. |
 | Short-lived service token | The relay obtains a `client_credentials` JWT (scope `chaos.command`, 5 minutes) and sends it as `Authorization: Bearer`. |
 | Actuator stays on loopback | chaos-lib calls Chaos Monkey at `127.0.0.1`. Callers never post the actuator from outside the instance. |
-| One command, every UP instance | `expectedInstances` is the UP count at submit time. An empty registry is `503` `NO_INSTANCES`. |
+| One command, selected UP instances | `instanceSelection` is `ALL` (every UP instance) or `SOME` (named discovery ids). `expectedInstances` is that selected count. An empty registry is `503` `NO_INSTANCES`. |
 
 ## 4. Component view
 

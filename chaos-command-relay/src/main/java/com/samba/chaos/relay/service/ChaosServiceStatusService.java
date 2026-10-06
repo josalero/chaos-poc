@@ -14,6 +14,7 @@ import com.samba.chaos.relay.store.ChaosCommandStore;
 import com.samba.chaos.relay.store.CommandRecord;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.stereotype.Service;
 
 /**
@@ -114,7 +115,11 @@ public class ChaosServiceStatusService {
 
   private ChaosServiceStatusResponse toResponse(String applicationName) {
     Optional<CommandRecord> latest = commandStore.findLatestByApplication(applicationName);
-    int liveInstances = instancesResolver.resolveUp(applicationName).size();
+    List<String> upInstanceIds =
+        instancesResolver.resolveUp(applicationName).stream()
+            .map(ServiceInstance::getInstanceId)
+            .toList();
+    int liveInstances = upInstanceIds.size();
 
     if (latest.isEmpty()) {
       return new ChaosServiceStatusResponse(
@@ -131,7 +136,8 @@ public class ChaosServiceStatusService {
           liveInstances,
           liveInstances,
           null,
-          null);
+          null,
+          upInstanceIds);
     }
 
     CommandRecord record = latest.get();
@@ -155,7 +161,8 @@ public class ChaosServiceStatusService {
         liveInstances,
         record.expectedInstances(),
         record.assault(),
-        appliedAssault);
+        appliedAssault,
+        upInstanceIds);
   }
 
   private Boolean resolveCmEnabled(

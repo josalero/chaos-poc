@@ -19,7 +19,9 @@ import java.util.UUID;
  * }
  * </pre>
  *
- * <p>{@code completedAt} is set only when the aggregate is APPLIED, FAILED, or TIMED_OUT.
+ * <p>{@code completedAt} is set only when the aggregate is APPLIED, FAILED, or TIMED_OUT. {@code
+ * instanceSelection} is ALL when the command omitted a scope. {@code expectedInstances} is the
+ * selected count, so SOME can be APPLIED while other replicas stay untouched.
  */
 public record ChaosCommandStatusResponse(
     UUID commandId,
@@ -35,4 +37,6 @@ public record ChaosCommandStatusResponse(
     String issuedBy,
     Instant expiresAt,
     ChaosAssaultConfig assault,
-    List<ChaosInstanceStatus> instances) {}
+    List<ChaosInstanceStatus> instances,
+    InstanceSelection instanceSelection,
+    List<String> instanceIds) {}

@@ -4,11 +4,14 @@ import com.samba.chaos.command.ChaosCommandAction;
 import com.samba.chaos.command.ChaosCommandMessage;
 import com.samba.chaos.relay.config.ChaosRelayProperties;
 import com.samba.chaos.relay.model.ChaosCommandRequest;
+import com.samba.chaos.relay.model.InstanceSelection;
 import com.samba.chaos.relay.model.ValidationErrorResponse;
 import com.samba.chaos.relay.model.ValidationErrorResponse.FieldError;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 
@@ -17,7 +20,8 @@ import org.springframework.stereotype.Component;
  *
  * <p>{@code environment} must be {@code test}. The target must be allowlisted. {@code assault} is
  * required for {@code CONFIGURE} and {@code CONFIGURE_AND_ENABLE}. {@code expiresAt} must be in the
- * future for {@code ENABLE} and {@code CONFIGURE_AND_ENABLE}.
+ * future for {@code ENABLE} and {@code CONFIGURE_AND_ENABLE}. {@code SOME} requires instance ids.
+ * {@code ALL} rejects instance ids.
  */
 @Component
 public class ChaosCommandValidator {
@@ -66,7 +70,38 @@ public class ChaosCommandValidator {
       validateAssault(request.assault(), errors);
     }
 
+    validateSelection(request, errors);
+
     return errors;
+  }
+
+  private void validateSelection(ChaosCommandRequest request, List<FieldError> errors) {
+    InstanceSelection selection =
+        request.instanceSelection() == null ? InstanceSelection.ALL : request.instanceSelection();
+    List<String> instanceIds = request.instanceIds() == null ? List.of() : request.instanceIds();
+    if (selection == InstanceSelection.ALL) {
+      if (!instanceIds.isEmpty()) {
+        errors.add(new FieldError("instanceIds", "omit instanceIds when instanceSelection is ALL"));
+      }
+      return;
+    }
+
+    if (instanceIds.isEmpty()) {
+      errors.add(new FieldError("instanceIds", "required when instanceSelection is SOME"));
+      return;
+    }
+
+    Set<String> seen = new HashSet<>();
+    for (String instanceId : instanceIds) {
+      if (instanceId == null || instanceId.isBlank()) {
+        errors.add(new FieldError("instanceIds", "instance id must not be blank"));
+        return;
+      }
+      if (!seen.add(instanceId)) {
+        errors.add(new FieldError("instanceIds", "duplicate instance id " + instanceId));
+        return;
+      }
+    }
   }
 
   private void validateAssault(

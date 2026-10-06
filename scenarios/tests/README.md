@@ -16,6 +16,7 @@ Manual test specifications for the chaos POC.
 | TC-CHAOS-008 | Default configuration rollback | [disable.md](disable.md) | P1 |
 | TC-CHAOS-009 | HTTP 500 during create | [exception-http-500-create.md](exception-http-500-create.md) | P1 |
 | TC-CHAOS-010 | HTTP 500 during submit | [exception-http-500-submit.md](exception-http-500-submit.md) | P1 |
+| TC-CHAOS-011 | Assault on some instances | [partial-instances.md](partial-instances.md) | P1 |
 
 ## Isolation model (transactional)
 

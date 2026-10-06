@@ -13,7 +13,7 @@ import {
 } from '../api/relayClient.js';
 import Notices from '../components/Notices.vue';
 import StatusBadge from '../components/StatusBadge.vue';
-import { leaseExpiresAt } from '../lib/commands.js';
+import { commandRequestJson, leaseExpiresAt } from '../lib/commands.js';
 import { errorMessages } from '../lib/errors.js';
 import { showErrors, showSuccess } from '../lib/notices.js';
 import { chaosMonkeyYaml } from '../lib/yaml.js';
@@ -34,7 +34,9 @@ const loading = ref(true);
 const loadError = ref('');
 const expiresAt = ref(leaseExpiresAt());
 const busy = ref('');
-const yamlText = ref('');
+const dialogText = ref('');
+const dialogTitle = ref('');
+const dialogHint = ref('');
 const dialog = ref(null);
 
 const applicationName = computed(() => route.params.applicationName);
@@ -100,9 +102,19 @@ watch(tab, (next) => {
   }
 });
 
-function openYaml(entry) {
-  yamlText.value = chaosMonkeyYaml(entry);
+function openDialog(title, hint, text) {
+  dialogTitle.value = title;
+  dialogHint.value = hint;
+  dialogText.value = text;
   dialog.value?.showModal();
+}
+
+function openYaml(entry) {
+  openDialog('Applied Chaos Monkey configuration', 'Effective values sent to the actuator', chaosMonkeyYaml(entry));
+}
+
+function openRequest(entry) {
+  openDialog('Command request JSON', 'Body published to the relay for this service', commandRequestJson(entry));
 }
 
 async function turnOff() {
@@ -210,8 +222,15 @@ async function clearData() {
           </dd>
         </div>
       </dl>
+      <div v-if="status.upInstanceIds?.length" class="mt-4">
+        <h3 class="text-sm font-medium">UP instances</h3>
+        <ul class="mt-2 flex flex-wrap gap-2">
+          <li v-for="instanceId in status.upInstanceIds" :key="instanceId" class="mono rounded-md bg-stone-100 px-2 py-1 text-xs">{{ instanceId }}</li>
+        </ul>
+      </div>
       <div class="mt-4 flex flex-wrap gap-2">
         <RouterLink class="rounded-md bg-stone-900 px-4 py-2 text-sm font-semibold text-white" :to="{ name: 'publish', query: { applicationName: status.applicationName } }">Configure new assault</RouterLink>
+        <RouterLink class="rounded-md border border-stone-300 px-4 py-2 text-sm" :to="{ name: 'publish', query: { applicationName: status.applicationName, instanceSelection: 'SOME' } }">Apply to some instances</RouterLink>
         <RouterLink class="rounded-md border border-stone-300 px-4 py-2 text-sm" :to="{ query: { tab: 'actuator' } }">View live actuator</RouterLink>
       </div>
     </section>
@@ -263,6 +282,7 @@ async function clearData() {
               <td class="py-2 pr-3">{{ entry.successCount }} ok / {{ entry.failureCount }} failed</td>
               <td class="py-2">
                 <RouterLink class="underline" :to="{ name: 'command', params: { commandId: entry.commandId } }">Details</RouterLink>
+                <button type="button" class="ml-3 underline" @click="openRequest(entry)">View JSON</button>
                 <button type="button" class="ml-3 underline" @click="openYaml(entry)">View YAML</button>
               </td>
             </tr>
@@ -305,11 +325,11 @@ async function clearData() {
   <dialog ref="dialog" class="w-full max-w-2xl rounded-xl p-0 backdrop:bg-stone-900/40">
     <header class="flex items-start justify-between gap-4 border-b border-stone-200 px-4 py-3">
       <div>
-        <strong>Applied Chaos Monkey configuration</strong>
-        <p class="text-sm text-stone-500">Effective values sent to the actuator</p>
+        <strong>{{ dialogTitle }}</strong>
+        <p class="text-sm text-stone-500">{{ dialogHint }}</p>
       </div>
       <form method="dialog"><button type="submit" class="rounded-md border border-stone-300 px-3 py-1 text-sm">Close</button></form>
     </header>
-    <pre class="mono max-h-[60vh] overflow-auto px-4 py-3 text-xs">{{ yamlText }}</pre>
+    <pre class="mono max-h-[60vh] overflow-auto px-4 py-3 text-xs">{{ dialogText }}</pre>
   </dialog>
 </template>

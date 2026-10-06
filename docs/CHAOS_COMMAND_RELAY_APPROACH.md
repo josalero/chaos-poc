@@ -65,7 +65,7 @@ Detailed flows: [CHAOS_SCENARIO_SEQUENCES.md](CHAOS_SCENARIO_SEQUENCES.md).
 
 ### Instance count
 
-The relay sets `expectedInstances` to the number of UP instances at submit time. `eurekaUpCount` on the service status is that same live count. An empty registry returns `503` with status `NO_INSTANCES`.
+The relay sets `expectedInstances` to the number of instances the command is sent to. `instanceSelection` defaults to `ALL`, which is every UP instance. `SOME` sends only the discovery instance ids in `instanceIds`; an id that is not UP is `400`. `eurekaUpCount` on the service status stays the live UP count, so a SOME command can be `APPLIED` with `expectedInstances` 1 while two replicas are still UP. The replicas that were not named keep their current assault. An empty registry returns `503` with status `NO_INSTANCES`. Reset and disable omit the selection, so they still reach every UP instance.
 
 Options considered:
 
@@ -150,7 +150,7 @@ A mismatched environment or application, a missing expiry, or an already-expired
 | --- | --- |
 | `PENDING` | No instance has reported yet, and the window is open |
 | `PARTIAL` | Some instances reported `SUCCESS`, the rest have not reported, and the window is open |
-| `APPLIED` | Every expected instance reported `SUCCESS` |
+| `APPLIED` | Every selected instance reported `SUCCESS` |
 | `FAILED` | At least one result is not `SUCCESS` |
 | `TIMED_OUT` | The window closed before every instance reported |
 

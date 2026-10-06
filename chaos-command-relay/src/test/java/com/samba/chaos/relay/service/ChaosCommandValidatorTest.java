@@ -7,6 +7,7 @@ import com.samba.chaos.command.ChaosCommandAction;
 import com.samba.chaos.relay.config.ChaosRelayProperties;
 import com.samba.chaos.relay.config.JacksonConfiguration;
 import com.samba.chaos.relay.model.ChaosCommandRequest;
+import com.samba.chaos.relay.model.InstanceSelection;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -124,5 +125,87 @@ class ChaosCommandValidatorTest {
     assertThat(validator.validate(request)).isEmpty();
     assertThat(validator.toMessage(request, commandId).commandId()).isEqualTo(commandId);
     assertThat(validator.toErrorResponse(List.of()).status()).isEqualTo("REJECTED");
+  }
+
+  @Test
+  void shouldRejectSomeWithoutInstanceIdsAndAllWithInstanceIds() {
+    ChaosCommandRequest some =
+        new ChaosCommandRequest(
+            null,
+            "test",
+            "chaos-poc-demo",
+            ChaosCommandAction.DISABLE,
+            null,
+            null,
+            "operator",
+            null,
+            InstanceSelection.SOME,
+            List.of());
+    ChaosCommandRequest all =
+        new ChaosCommandRequest(
+            null,
+            "test",
+            "chaos-poc-demo",
+            ChaosCommandAction.DISABLE,
+            null,
+            null,
+            "operator",
+            null,
+            InstanceSelection.ALL,
+            List.of("pod-a"));
+
+    assertThat(validator.validate(some)).anyMatch(error -> error.field().equals("instanceIds"));
+    assertThat(validator.validate(all)).anyMatch(error -> error.field().equals("instanceIds"));
+  }
+
+  @Test
+  void shouldAcceptSomeWhenInstanceIdsArePresent() {
+    ChaosCommandRequest request =
+        new ChaosCommandRequest(
+            null,
+            "test",
+            "chaos-poc-demo",
+            ChaosCommandAction.DISABLE,
+            null,
+            null,
+            "operator",
+            "partial",
+            InstanceSelection.SOME,
+            List.of("pod-a"));
+
+    assertThat(validator.validate(request)).isEmpty();
+  }
+
+  @Test
+  void shouldRejectBlankAndDuplicateInstanceIds() {
+    ChaosCommandRequest blank =
+        new ChaosCommandRequest(
+            null,
+            "test",
+            "chaos-poc-demo",
+            ChaosCommandAction.DISABLE,
+            null,
+            null,
+            "operator",
+            null,
+            InstanceSelection.SOME,
+            List.of(" "));
+    ChaosCommandRequest duplicate =
+        new ChaosCommandRequest(
+            null,
+            "test",
+            "chaos-poc-demo",
+            ChaosCommandAction.DISABLE,
+            null,
+            null,
+            "operator",
+            null,
+            InstanceSelection.SOME,
+            List.of("pod-a", "pod-a"));
+
+    assertThat(validator.validate(blank))
+        .anyMatch(error -> error.message().contains("must not be blank"));
+    assertThat(validator.validate(duplicate))
+        .anyMatch(error -> error.message().contains("duplicate instance id pod-a"));
   }
 }

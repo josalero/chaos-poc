@@ -13,6 +13,7 @@ import com.samba.chaos.relay.model.ChaosCommandRequest;
 import com.samba.chaos.relay.model.ChaosCommandStatusResponse;
 import com.samba.chaos.relay.model.ChaosInstanceStatus;
 import com.samba.chaos.relay.model.CommandAggregateStatus;
+import com.samba.chaos.relay.model.InstanceSelection;
 import com.samba.chaos.relay.service.ChaosCommandService;
 import feign.Client;
 import feign.Request;
@@ -187,6 +188,66 @@ class ChaosCommandRelayIntegrationTest {
                   .extracting(ChaosInstanceStatus::outcome)
                   .containsOnly(InstanceOutcome.UNREACHABLE);
             });
+    assertThat(pods.seen()).isEmpty();
+  }
+
+  @Test
+  void submit_whenSomeSelectsOneInstance_appliesOnlyToThatInstance() {
+    pods.whenUrl(POD_A, request -> authorizedJson(request, "pod-a", "SUCCESS"));
+
+    ChaosCommandService.SubmitResult result =
+        commandService.submit(
+            new ChaosCommandRequest(
+                null,
+                "test",
+                "chaos-poc-demo",
+                ChaosCommandAction.ENABLE,
+                null,
+                Instant.now().plusSeconds(60),
+                "integration-test",
+                "some",
+                InstanceSelection.SOME,
+                List.of("pod-a")));
+
+    assertThat(result).isInstanceOf(ChaosCommandService.SubmitResult.Accepted.class);
+    UUID id = ((ChaosCommandService.SubmitResult.Accepted) result).response().commandId();
+
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .untilAsserted(
+            () -> {
+              ChaosCommandStatusResponse status = commandService.getStatus(id).orElseThrow();
+              assertThat(status.instanceSelection()).isEqualTo(InstanceSelection.SOME);
+              assertThat(status.instanceIds()).containsExactly("pod-a");
+              assertThat(status.expectedInstances()).isEqualTo(1);
+              assertThat(status.status()).isEqualTo(CommandAggregateStatus.APPLIED);
+              assertThat(status.instances())
+                  .extracting(ChaosInstanceStatus::podName)
+                  .containsExactly("pod-a");
+            });
+    assertThat(pods.seen()).extracting(Request::url).containsExactly(POD_A);
+  }
+
+  @Test
+  void submit_whenSomeNamesAnInstanceThatIsNotUp_isRejected() {
+    ChaosCommandService.SubmitResult result =
+        commandService.submit(
+            new ChaosCommandRequest(
+                null,
+                "test",
+                "chaos-poc-demo",
+                ChaosCommandAction.ENABLE,
+                null,
+                Instant.now().plusSeconds(60),
+                "integration-test",
+                "missing",
+                InstanceSelection.SOME,
+                List.of("pod-missing")));
+
+    assertThat(result).isInstanceOf(ChaosCommandService.SubmitResult.Rejected.class);
+    assertThat(((ChaosCommandService.SubmitResult.Rejected) result).response().errors())
+        .extracting(error -> error.field())
+        .containsExactly("instanceIds");
     assertThat(pods.seen()).isEmpty();
   }
 
