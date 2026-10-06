@@ -7,6 +7,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Repository;
 
+/** Member. */
 @Repository
 public class InMemoryOrderRepository implements OrderRepository {
 

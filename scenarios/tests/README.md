@@ -1,7 +1,7 @@
 # Chaos POC — Manual UI test cases
 
 Manual test specifications for the chaos POC.  
-**Apply scenarios and teardown** use the **operator console** (`http://localhost:18090/chaos`).  
+**Apply scenarios and teardown** use the **operator console** (`http://localhost:18000/chaos`).  
 **Monitor and verify** use the **verify UI** (`http://localhost:18000`).
 
 | Test case ID | Title | Specification | Priority |
@@ -59,7 +59,7 @@ Each Markdown specification includes:
 
 2. Wait until all services are healthy (`docker compose ps` — no service stuck in `starting`).
 
-3. Open **verify UI**: http://localhost:18000 and **operator console**: http://localhost:18090/chaos
+3. Open **verify UI**: http://localhost:18000 and **operator console**: http://localhost:18000/chaos
 
 4. On the verify UI, confirm **Demo target OK** before exercising APIs.
 
@@ -69,7 +69,7 @@ Each Markdown specification includes:
 
 | UI area | Location | Used for |
 |---------|----------|----------|
-| **Operator console** | http://localhost:18090/chaos | Apply presets, disable CM, reset configuration, command history |
+| **Operator console** | http://localhost:18000/chaos | Apply presets, disable CM, reset configuration, command history |
 | **Reset all services** | Operator console dashboard or header | **Setup** and **teardown** — disables CM on every registered target and clears admin data |
 | **Reset configuration** | Operator console → service detail | Reset a single target only |
 | **Chaos Monkey state** | Verify UI (top panel) | Enabled flag, assault metrics, watched methods |

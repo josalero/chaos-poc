@@ -1,0 +1,48 @@
+server:
+  port: 8080
+
+spring:
+  cloud:
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: demo-api
+              uri: lb://chaos-poc-demo
+              predicates:
+                - Path=/api/demo/**
+              filters:
+                - StripPrefix=2
+            - id: downstream-api
+              uri: lb://chaos-poc-downstream
+              predicates:
+                - Path=/api/downstream/**
+              filters:
+                - StripPrefix=2
+            - id: relay-api
+              uri: lb://chaos-command-relay
+              predicates:
+                - Path=/api/relay/**
+              filters:
+                - StripPrefix=2
+            - id: relay-console
+              uri: http://chaos-command-relay-ui:80
+              predicates:
+                - Path=/chaos,/chaos/**
+              filters:
+                - StripPrefix=1
+            - id: operator-redirect
+              uri: no://op
+              predicates:
+                - Path=/operator,/operator/**
+              filters:
+                - RedirectTo=302, /chaos
+            - id: ui
+              uri: http://chaos-poc-ui:80
+              predicates:
+                - Path=/**
+              order: 1000
+    loadbalancer:
+      configurations: request-based-sticky-session
+      sticky-session:
+        instance-id-cookie-name: sc-lb-instance-id

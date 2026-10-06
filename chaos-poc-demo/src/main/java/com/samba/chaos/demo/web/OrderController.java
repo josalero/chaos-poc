@@ -13,36 +13,43 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/** Member. */
 @RestController
 @RequestMapping("/api/v1/orders")
 public class OrderController {
 
   private final OrderService orderService;
 
+  /** Order Controller. */
   public OrderController(OrderService orderService) {
     this.orderService = orderService;
   }
 
+  /** Member. */
   @PostMapping
   public ResponseEntity<Order> create(@RequestBody CreateOrderRequest request) {
     Order order = orderService.placeOrder(request.sku(), request.quantity());
     return ResponseEntity.status(HttpStatus.CREATED).body(order);
   }
 
+  /** Post Mapping. */
   @PostMapping("/{orderId}/submit")
   public ResponseEntity<Order> submit(@PathVariable UUID orderId) {
     return ResponseEntity.ok(orderService.submitOrder(orderId));
   }
 
+  /** Get Mapping. */
   @GetMapping("/{orderId}")
   public ResponseEntity<Order> get(@PathVariable UUID orderId) {
     return ResponseEntity.ok(orderService.getOrder(orderId));
   }
 
+  /** Get Mapping. */
   @GetMapping("/health-check")
   public Map<String, String> healthCheck() {
     return Map.of("status", "ok");
   }
 
+  /** Create Order Request. */
   public record CreateOrderRequest(String sku, int quantity) {}
 }

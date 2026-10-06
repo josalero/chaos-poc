@@ -1,14 +1,30 @@
 server:
   port: 8090
+  tomcat:
+    use-relative-redirects: true
 
 spring:
   application:
     name: chaos-command-relay
-  rabbitmq:
-    host: localhost
-    port: 5672
-    username: chaos
-    password: chaos
+  config:
+    import: optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}
+  http:
+    clients:
+      connect-timeout: 2s
+      read-timeout: 10s
+  security:
+    oauth2:
+      client:
+        registration:
+          chaos-command-relay:
+            provider: chaos-auth
+            client-id: chaos-command-relay
+            client-secret: ${CHAOS_RELAY_CLIENT_SECRET:local-poc-only}
+            authorization-grant-type: client_credentials
+            scope: chaos.command
+        provider:
+          chaos-auth:
+            token-uri: ${CHAOS_AUTH_URL:http://localhost:9000}/oauth2/token
 
 chaos:
   relay:
@@ -17,22 +33,10 @@ chaos:
       - chaos-poc-downstream
     status-timeout-seconds: 30
     command-ttl-hours: 24
-    expected-instances-fallback:
-      chaos-poc-demo: 1
-      chaos-poc-downstream: 1
-    actuator-base-urls:
-      chaos-poc-demo: http://localhost:18080/actuator/chaosmonkey
-      chaos-poc-downstream: http://localhost:18081/actuator/chaosmonkey
-    admin-base-urls:
-      chaos-poc-demo: http://localhost:18080
-      chaos-poc-downstream: http://localhost:18081
     verify-ui-url: http://localhost:18000
-    rabbit:
-      commands-exchange: chaos.commands.test
-      results-queue: chaos.command-results
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics

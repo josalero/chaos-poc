@@ -1,51 +1,103 @@
+x-java-env: &java-env
+  CONFIG_SERVER_URL: http://chaos-config-server:8888
+  EUREKA_URL: http://chaos-discovery-server:8761/eureka
+  CHAOS_AUTH_URL: http://chaos-auth-server:9000
+  CHAOS_AUTH_ISSUER: http://chaos-auth-server:9000
+
 services:
-  rabbitmq:
-    image: rabbitmq:3.13-management
+  chaos-auth-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: auth-server
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "9000:9000"
     environment:
-      RABBITMQ_DEFAULT_USER: chaos
-      RABBITMQ_DEFAULT_PASS: chaos
+      CHAOS_AUTH_ISSUER: http://chaos-auth-server:9000
+      CHAOS_RELAY_CLIENT_SECRET: ${CHAOS_RELAY_CLIENT_SECRET:-local-poc-only}
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/actuator/health"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 20s
+      start_period: 30s
+
+  chaos-discovery-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: discovery-server
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8761/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  chaos-config-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: config-server
+    ports:
+      - "8888:8888"
+    environment:
+      <<: *java-env
+      CONFIG_REPO_LOCATION: file:/config-repo
+    volumes:
+      - ./config-repo:/config-repo:ro
+    depends_on:
+      chaos-discovery-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8888/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
 
   chaos-poc-downstream:
     build:
       context: .
       dockerfile: Dockerfile
       target: chaos-poc-downstream
+    deploy:
+      replicas: 2
     ports:
-      - "18081:8081"
+      - "18181-18185:8081"
     environment:
-      SPRING_PROFILES_ACTIVE: docker,test,chaos-monkey
-      HOSTNAME: chaos-poc-downstream
+      <<: *java-env
+      SPRING_PROFILES_ACTIVE: test,chaos-monkey
     depends_on:
-      rabbitmq:
+      chaos-config-server:
+        condition: service_healthy
+      chaos-auth-server:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 30s
+      start_period: 40s
 
   chaos-poc-demo:
     build:
       context: .
       dockerfile: Dockerfile
       target: chaos-poc-demo
+    deploy:
+      replicas: 2
     ports:
-      - "18080:8080"
+      - "18080-18084:8080"
     environment:
-      SPRING_PROFILES_ACTIVE: docker,test,chaos-monkey
-      HOSTNAME: chaos-poc-demo
+      <<: *java-env
+      SPRING_PROFILES_ACTIVE: test,chaos-monkey
     depends_on:
-      rabbitmq:
+      chaos-config-server:
+        condition: service_healthy
+      chaos-auth-server:
         condition: service_healthy
       chaos-poc-downstream:
         condition: service_healthy
@@ -64,9 +116,12 @@ services:
     ports:
       - "18090:8090"
     environment:
-      SPRING_PROFILES_ACTIVE: docker
+      <<: *java-env
+      CHAOS_RELAY_CLIENT_SECRET: ${CHAOS_RELAY_CLIENT_SECRET:-local-poc-only}
     depends_on:
-      rabbitmq:
+      chaos-config-server:
+        condition: service_healthy
+      chaos-auth-server:
         condition: service_healthy
       chaos-poc-downstream:
         condition: service_healthy
@@ -79,17 +134,46 @@ services:
       retries: 12
       start_period: 45s
 
+  chaos-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: gateway
+    ports:
+      - "18000:8080"
+    environment:
+      <<: *java-env
+    depends_on:
+      chaos-config-server:
+        condition: service_healthy
+      chaos-command-relay:
+        condition: service_healthy
+      chaos-command-relay-ui:
+        condition: service_started
+      chaos-poc-ui:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  chaos-command-relay-ui:
+    build:
+      context: .
+      dockerfile: chaos-command-relay-ui/Dockerfile
+      args:
+        VITE_RELAY_API_URL: /api/relay
+        VITE_VERIFY_UI_URL: /
+    depends_on:
+      chaos-command-relay:
+        condition: service_healthy
+
   chaos-poc-ui:
     build:
       context: .
       dockerfile: chaos-poc-ui/Dockerfile
       args:
         VITE_DEMO_URL: /api/demo
-        VITE_OPERATOR_CONSOLE_URL: /operator/
-    ports:
-      - "18000:80"
-    depends_on:
-      chaos-command-relay:
-        condition: service_healthy
-      chaos-poc-demo:
-        condition: service_healthy
+        VITE_OPERATOR_CONSOLE_URL: /chaos

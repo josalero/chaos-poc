@@ -4,48 +4,56 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <!-- Aligned with data-solutions-ui-service → samba-external-parent-bom 4.0.9 -->
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>3.0.9</version>
+    <version>4.0.6</version>
     <relativePath/>
   </parent>
 
   <groupId>com.samba.chaos</groupId>
   <artifactId>chaos-poc</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.2.0-SNAPSHOT</version>
   <packaging>pom</packaging>
   <name>Chaos Command Relay POC</name>
   <description>Chaos command relay POC — versions aligned with data-solutions-ui-service</description>
 
   <modules>
-    <module>chaos-listener-lib</module>
+    <module>chaos-lib</module>
     <module>chaos-command-relay</module>
     <module>chaos-poc-downstream</module>
     <module>chaos-poc-demo</module>
+    <module>discovery-server</module>
+    <module>config-server</module>
+    <module>gateway</module>
+    <module>auth-server</module>
   </modules>
 
   <properties>
-    <java.version>17</java.version>
-    <testcontainers.version>1.19.3</testcontainers.version>
-    <spring-cloud.version>2022.0.4</spring-cloud.version>
-    <chaos-monkey.version>3.1.0</chaos-monkey.version>
+    <!-- Mirrors com.samba:springboot-4.0-bom:1.0.7 used by data-solutions-ui-service
+         (spring-boot.version 4.0.6, spring-cloud.version 2025.1.0); bump together. -->
+    <java.version>21</java.version>
+    <spring-cloud.version>2025.1.0</spring-cloud.version>
+    <chaos-monkey.version>4.0.0</chaos-monkey.version>
+    <!-- Plugin versions and the per-class line gate match samba-jdk21-parent 1.0.1.
+         The parent itself is not used: it resolves through Artifactory, and this POC
+         builds inside a public Maven image. -->
+    <checkstyle.plugin.version>3.6.0</checkstyle.plugin.version>
+    <checkstyle.dependency.version>13.8.0</checkstyle.dependency.version>
+    <code.coverage.minimum>0.95</code.coverage.minimum>
+    <jacoco.version>0.8.15</jacoco.version>
+    <pmd-plugin.version>3.28.0</pmd-plugin.version>
+    <spotbugs.version>4.10.3.0</spotbugs.version>
+    <spotless.version>3.8.0</spotless.version>
+    <sonar.coverage.jacoco.xmlReportPaths>target/site/jacoco-ut/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
   </properties>
 
   <dependencyManagement>
     <dependencies>
       <dependency>
         <groupId>com.samba.chaos</groupId>
-        <artifactId>chaos-listener-lib</artifactId>
+        <artifactId>chaos-lib</artifactId>
         <version>${project.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.testcontainers</groupId>
-        <artifactId>testcontainers-bom</artifactId>
-        <version>${testcontainers.version}</version>
-        <type>pom</type>
-        <scope>import</scope>
       </dependency>
       <dependency>
         <groupId>org.springframework.cloud</groupId>
@@ -61,5 +69,168 @@
       </dependency>
     </dependencies>
   </dependencyManagement>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId>
+        <artifactId>spotless-maven-plugin</artifactId>
+        <version>${spotless.version}</version>
+        <configuration>
+          <java>
+            <googleJavaFormat/>
+          </java>
+        </configuration>
+        <executions>
+          <execution>
+            <id>spotless-check</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-checkstyle-plugin</artifactId>
+        <version>${checkstyle.plugin.version}</version>
+        <dependencies>
+          <dependency>
+            <groupId>com.puppycrawl.tools</groupId>
+            <artifactId>checkstyle</artifactId>
+            <version>${checkstyle.dependency.version}</version>
+          </dependency>
+        </dependencies>
+        <configuration>
+          <configLocation>google_checks.xml</configLocation>
+          <consoleOutput>true</consoleOutput>
+          <failsOnError>true</failsOnError>
+          <violationSeverity>warning</violationSeverity>
+          <includeTestSourceDirectory>true</includeTestSourceDirectory>
+        </configuration>
+        <executions>
+          <execution>
+            <id>checkstyle-validate</id>
+            <phase>validate</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-pmd-plugin</artifactId>
+        <version>${pmd-plugin.version}</version>
+        <executions>
+          <execution>
+            <id>pmd</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+              <goal>cpd-check</goal>
+            </goals>
+            <configuration>
+              <printFailingErrors>true</printFailingErrors>
+              <failOnViolation>true</failOnViolation>
+              <rulesets>
+                <ruleset>/category/java/bestpractices.xml</ruleset>
+              </rulesets>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <argLine>${surefireArgLine}</argLine>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${jacoco.version}</version>
+        <configuration>
+          <excludes>
+            <exclude>META-INF/**</exclude>
+            <exclude>**/*Application.class</exclude>
+          </excludes>
+        </configuration>
+        <executions>
+          <execution>
+            <id>jacoco-prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+            <configuration>
+              <destFile>${project.build.directory}/coverage-reports/jacoco-ut.exec</destFile>
+              <propertyName>surefireArgLine</propertyName>
+            </configuration>
+          </execution>
+          <execution>
+            <id>jacoco-report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+            <configuration>
+              <dataFile>${project.build.directory}/coverage-reports/jacoco-ut.exec</dataFile>
+              <outputDirectory>${project.reporting.outputDirectory}/jacoco-ut</outputDirectory>
+            </configuration>
+          </execution>
+          <execution>
+            <id>jacoco-check</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <configuration>
+              <dataFile>${project.build.directory}/coverage-reports/jacoco-ut.exec</dataFile>
+              <excludes>
+                <exclude>META-INF/**</exclude>
+                <exclude>**/*Application.class</exclude>
+              </excludes>
+              <rules>
+                <rule>
+                  <element>CLASS</element>
+                  <limits>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>${code.coverage.minimum}</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>com.github.spotbugs</groupId>
+        <artifactId>spotbugs-maven-plugin</artifactId>
+        <version>${spotbugs.version}</version>
+        <configuration>
+          <excludeFilterFile>${maven.multiModuleProjectDirectory}/spotbugs-exclude.xml</excludeFilterFile>
+        </configuration>
+        <executions>
+          <execution>
+            <id>spotbugs-check</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 
 </project>

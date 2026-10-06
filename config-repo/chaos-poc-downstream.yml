@@ -1,0 +1,20 @@
+server:
+  port: 8081
+
+chaos:
+  monkey:
+    enabled: false
+    watcher:
+      service: true
+      restController: false
+    assaults:
+      level: 1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,chaosmonkey
+  endpoint:
+    chaosmonkey:
+      access: unrestricted

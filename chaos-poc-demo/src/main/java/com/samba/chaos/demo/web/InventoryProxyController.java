@@ -7,16 +7,19 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/** Member. */
 @RestController
 @RequestMapping("/api/v1/inventory")
 public class InventoryProxyController {
 
   private final InventoryClient inventoryClient;
 
+  /** Inventory Proxy Controller. */
   public InventoryProxyController(InventoryClient inventoryClient) {
     this.inventoryClient = inventoryClient;
   }
 
+  /** Get Mapping. */
   @GetMapping("/{sku}")
   public Map<String, Object> getStock(@PathVariable String sku) {
     return inventoryClient.getStock(sku);

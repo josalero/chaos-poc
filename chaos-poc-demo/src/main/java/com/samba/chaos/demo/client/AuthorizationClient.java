@@ -1,13 +1,16 @@
 package com.samba.chaos.demo.client;
 
 import java.util.Map;
-import org.springframework.cloud.openfeign.FeignClient;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.service.annotation.GetExchange;
+import org.springframework.web.service.annotation.HttpExchange;
 
-@FeignClient(name = "authorization", url = "${samba.chaos.demo.inventory.base-url}")
+/** Http Exchange. */
+@SuppressWarnings("PMD.ImplicitFunctionalInterface")
+@HttpExchange("/v1")
 public interface AuthorizationClient {
 
-  @GetMapping("/v1/auth/{resource}")
+  /** Get Exchange. */
+  @GetExchange("/auth/{resource}")
   Map<String, String> checkAccess(@PathVariable("resource") String resource);
 }

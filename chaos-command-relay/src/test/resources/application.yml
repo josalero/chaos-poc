@@ -1,0 +1,32 @@
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          chaos-command-relay:
+            provider: chaos-auth
+            client-id: chaos-command-relay
+            client-secret: test-secret
+            authorization-grant-type: client_credentials
+            scope: chaos.command
+        provider:
+          chaos-auth:
+            token-uri: http://localhost:9/oauth2/token
+  cloud:
+    config:
+      enabled: false
+      import-check:
+        enabled: false
+    discovery:
+      enabled: false
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+chaos:
+  relay:
+    allowed-target-applications:
+      - chaos-poc-demo
+      - chaos-poc-downstream

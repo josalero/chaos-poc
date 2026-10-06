@@ -7,11 +7,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+/** Member. */
 @Service
 public class InventoryService {
 
   private final Set<String> reserved = ConcurrentHashMap.newKeySet();
 
+  /** Get Stock. */
   public Map<String, Object> getStock(String sku) {
     if ("NOT-FOUND".equalsIgnoreCase(sku)) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "SKU not found");
@@ -22,6 +24,7 @@ public class InventoryService {
     return Map.of("sku", sku, "available", 42, "warehouse", "WH-01");
   }
 
+  /** Reserve. */
   public Map<String, Object> reserve(String sku) {
     if ("CONFLICT".equalsIgnoreCase(sku) || !reserved.add(sku.toUpperCase())) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, "SKU already reserved");
@@ -29,6 +32,7 @@ public class InventoryService {
     return Map.of("sku", sku, "status", "RESERVED");
   }
 
+  /** Clear Reservations. */
   public void clearReservations() {
     reserved.clear();
   }

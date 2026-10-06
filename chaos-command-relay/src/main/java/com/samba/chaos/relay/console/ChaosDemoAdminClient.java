@@ -1,31 +1,52 @@
 package com.samba.chaos.relay.console;
 
-import com.samba.chaos.relay.ChaosRelayProperties;
-import java.util.Map;
+import com.samba.chaos.relay.service.TargetInstancesResolver;
+import java.util.List;
+import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 
+/**
+ * Clears demo orders by posting {@code /api/v1/admin/reset} to every UP instance.
+ *
+ * <p>This does not change the Chaos Monkey assault.
+ */
 @Service
 public class ChaosDemoAdminClient {
 
-  private final ChaosRelayProperties properties;
-  private final RestTemplate restTemplate;
+  private final TargetInstancesResolver instancesResolver;
+  private final RestClient restClient;
 
-  public ChaosDemoAdminClient(ChaosRelayProperties properties, RestTemplate restTemplate) {
-    this.properties = properties;
-    this.restTemplate = restTemplate;
+  /**
+   * Creates the client.
+   *
+   * @param instancesResolver UP instances of the target application
+   * @param restClient HTTP client
+   */
+  public ChaosDemoAdminClient(TargetInstancesResolver instancesResolver, RestClient restClient) {
+    this.instancesResolver = instancesResolver;
+    this.restClient = restClient;
   }
 
+  /**
+   * Posts the admin reset to each UP instance.
+   *
+   * @param applicationName Eureka application name
+   * @return false when no instance is UP
+   * @throws IllegalStateException when an instance rejects or drops the call
+   */
   public boolean resetDemoData(String applicationName) {
-    String baseUrl = properties.getAdminBaseUrls().get(applicationName);
-    if (baseUrl == null || baseUrl.isBlank()) {
+    List<ServiceInstance> instances = instancesResolver.resolveUp(applicationName);
+    if (instances.isEmpty()) {
       return false;
     }
 
-    String url = baseUrl.replaceAll("/$", "") + "/api/v1/admin/reset";
     try {
-      restTemplate.postForEntity(url, null, Map.class);
+      for (ServiceInstance instance : instances) {
+        String url = instance.getUri() + "/api/v1/admin/reset";
+        restClient.post().uri(url).retrieve().toBodilessEntity();
+      }
       return true;
     } catch (RestClientException ex) {
       throw new IllegalStateException(

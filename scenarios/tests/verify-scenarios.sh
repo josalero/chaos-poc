@@ -5,7 +5,13 @@
 set -euo pipefail
 
 RELAY="${RELAY_URL:-http://localhost:18090}"
-DEMO="${DEMO_URL:-http://localhost:18080}"
+if [[ -z "${DEMO_URL:-}" ]]; then
+  published=$(docker port chaos-poc-chaos-poc-demo-1 8080 2>/dev/null | head -1 | sed 's/.*://')
+  DEMO="${published:+http://localhost:${published}}"
+  DEMO="${DEMO:-http://localhost:18080}"
+else
+  DEMO="${DEMO_URL}"
+fi
 SCENARIOS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 SUITE_FAILED=0
@@ -14,7 +20,12 @@ submit() {
   local file="$1"
   local correlation="$2"
   local payload
-  payload=$(jq -c --arg c "$correlation" '. + {correlationId: $c, issuedBy: "verify-scenarios"}' "$file")
+  local expires_at
+  expires_at=$(python3 -c 'from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat().replace("+00:00", "Z"))')
+  payload=$(jq -c --arg c "$correlation" --arg e "$expires_at" '
+    . + {correlationId: $c, issuedBy: "verify-scenarios"}
+    | if (.action == "ENABLE" or .action == "CONFIGURE_AND_ENABLE") then .expiresAt = $e else . end
+  ' "$file")
   local response
   response=$(curl -sf -X POST "$RELAY/internal/v1/chaos/commands" -H 'Content-Type: application/json' -d "$payload")
   local command_id

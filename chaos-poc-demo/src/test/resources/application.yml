@@ -1,7 +1,18 @@
+spring:
+  cloud:
+    config:
+      enabled: false
+      import-check:
+        enabled: false
+    discovery:
+      enabled: false
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
 samba:
   chaos:
-    command-listener:
+    command:
       enabled: false
-    demo:
-      inventory:
-        base-url: http://localhost:8081

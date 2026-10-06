@@ -1,0 +1,19 @@
+server:
+  port: 8090
+  tomcat:
+    use-relative-redirects: true
+
+spring:
+  http:
+    clients:
+      connect-timeout: 2s
+      read-timeout: 10s
+
+chaos:
+  relay:
+    allowed-target-applications:
+      - chaos-poc-demo
+      - chaos-poc-downstream
+    status-timeout-seconds: 30
+    command-ttl-hours: 24
+    verify-ui-url: http://localhost:18000

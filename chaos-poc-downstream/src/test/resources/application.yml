@@ -1,3 +1,16 @@
-chaos:
-  command-listener:
+spring:
+  cloud:
+    config:
+      enabled: false
+      import-check:
+        enabled: false
+    discovery:
+      enabled: false
+eureka:
+  client:
     enabled: false
+
+samba:
+  chaos:
+    command:
+      enabled: false

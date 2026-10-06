@@ -4,21 +4,23 @@ server:
 spring:
   application:
     name: chaos-poc-demo
+  config:
+    import: optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}
   profiles:
     active: local,chaos-monkey
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${CHAOS_AUTH_ISSUER:http://localhost:9000}
+          jwk-set-uri: ${CHAOS_AUTH_URL:http://localhost:9000}/oauth2/jwks
 
 samba:
   chaos:
-    command-listener:
+    command:
       enabled: true
-      rabbitmq:
-        host: localhost
-        port: 5672
-        username: chaos
-        password: chaos
-    demo:
-      inventory:
-        base-url: http://localhost:8081
+      pod-name: ${HOSTNAME:chaos-poc-demo}
+      actuator-base-url: http://127.0.0.1:8080/actuator/chaosmonkey
 
 chaos:
   monkey:
@@ -33,7 +35,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,chaosmonkey
+        include: health,metrics,chaosmonkey
   endpoint:
     chaosmonkey:
-      enabled: true
+      access: unrestricted

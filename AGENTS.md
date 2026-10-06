@@ -20,4 +20,4 @@ Requires `make build` in the agent-skills clone if `dist/` is missing.
 
 ## Stack
 
-Java 25, Spring Boot, RabbitMQ, Docker Compose — see [README.md](README.md).
+Java 21, Spring Boot 4, Eureka, Spring Cloud Gateway, Docker Compose. The operator console is the Vue 3 app `chaos-command-relay-ui`. See [README.md](README.md).

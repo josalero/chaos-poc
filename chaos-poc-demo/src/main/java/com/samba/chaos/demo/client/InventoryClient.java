@@ -1,20 +1,24 @@
 package com.samba.chaos.demo.client;
 
 import java.util.Map;
-import org.springframework.cloud.openfeign.FeignClient;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.service.annotation.GetExchange;
+import org.springframework.web.service.annotation.HttpExchange;
+import org.springframework.web.service.annotation.PostExchange;
 
-@FeignClient(name = "inventory", url = "${samba.chaos.demo.inventory.base-url}")
+/** Http Exchange. */
+@HttpExchange("/v1")
 public interface InventoryClient {
 
-  @GetMapping("/v1/inventory/{sku}")
+  /** Get Exchange. */
+  @GetExchange("/inventory/{sku}")
   Map<String, Object> getStock(@PathVariable("sku") String sku);
 
-  @PostMapping("/v1/inventory/reserve")
+  /** Post Exchange. */
+  @PostExchange("/inventory/reserve")
   Map<String, Object> reserve(@RequestBody ReserveRequest request);
 
+  /** Reserve Request. */
   record ReserveRequest(String sku, int quantity) {}
 }
