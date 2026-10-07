@@ -12,8 +12,7 @@ class ChaosPropertiesTest {
 
     assertThat(properties.getEnvironment()).isEqualTo("test");
     assertThat(properties.getPodName()).isEqualTo("local");
-    assertThat(properties.getActuatorBaseUrl())
-        .isEqualTo("http://127.0.0.1:8080/actuator/chaosmonkey");
+    assertThat(properties.getActuatorBaseUrl()).isNull();
     assertThat(properties.getMaxApplyAttempts()).isEqualTo(3);
     assertThat(properties.getApplyBackoffMs()).isEqualTo(200);
     assertThat(properties.isEnabled()).isFalse();

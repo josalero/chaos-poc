@@ -12,11 +12,8 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
 
 /** Enforces enable-command expiry locally so an abandoned experiment cannot remain active. */
-@Component
 public class ChaosExpiryGuard {
 
   private static final Logger log = LoggerFactory.getLogger(ChaosExpiryGuard.class);
@@ -29,7 +26,6 @@ public class ChaosExpiryGuard {
   private ScheduledFuture<?> pendingDisable;
 
   /** Creates a guard that disables Chaos Monkey on a daemon thread when a lease expires. */
-  @Autowired
   public ChaosExpiryGuard(ChaosActuatorClient actuatorClient, ChaosMetrics metrics) {
     this(
         actuatorClient,

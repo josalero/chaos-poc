@@ -6,8 +6,6 @@ spring:
     name: chaos-poc-downstream
   config:
     import: optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888}
-  profiles:
-    active: local,chaos-monkey
   security:
     oauth2:
       resourceserver:
@@ -20,22 +18,3 @@ samba:
     command:
       enabled: true
       pod-name: ${HOSTNAME:chaos-poc-downstream}
-      actuator-base-url: http://127.0.0.1:8081/actuator/chaosmonkey
-
-chaos:
-  monkey:
-    enabled: false
-    watcher:
-      service: true
-      restController: false
-    assaults:
-      level: 1
-
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,metrics,chaosmonkey
-  endpoint:
-    chaosmonkey:
-      access: unrestricted

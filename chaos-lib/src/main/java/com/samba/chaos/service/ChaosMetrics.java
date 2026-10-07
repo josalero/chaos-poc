@@ -2,10 +2,8 @@ package com.samba.chaos.service;
 
 import com.samba.chaos.command.InstanceOutcome;
 import io.micrometer.core.instrument.MeterRegistry;
-import org.springframework.stereotype.Component;
 
 /** Counters for applied, rejected, repeated, and automatically disabled commands. */
-@Component
 public class ChaosMetrics {
 
   private final MeterRegistry meterRegistry;

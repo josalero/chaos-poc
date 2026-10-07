@@ -10,7 +10,7 @@ public class ChaosProperties {
   private String environment = "test";
   private String applicationName;
   private String podName = "local";
-  private String actuatorBaseUrl = "http://127.0.0.1:8080/actuator/chaosmonkey";
+  private String actuatorBaseUrl;
   private int maxApplyAttempts = 3;
   private long applyBackoffMs = 200;
 

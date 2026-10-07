@@ -148,13 +148,11 @@ cd chaos-poc-demo && mvn spring-boot:run    # terminal A
 cd chaos-command-relay && mvn spring-boot:run  # terminal B
 ```
 
-## Embedding chaos-lib
+## Embedding the chaos command starter
 
-1. Add dependency `chaos-lib`
-2. Declare `spring-boot-starter-actuator` and `chaos-monkey-spring-boot` in the host service (not transitive from the lib)
-3. Point `spring.security.oauth2.resourceserver.jwt.issuer-uri` / `jwk-set-uri` at the auth server, and declare a `SecurityFilterChain` for the host's own routes (chaos-lib secures only `/internal/chaos/**`, requiring scope `chaos.command`)
-4. Configure chaos-lib, Chaos Monkey, and the actuator — full YAML: [§9.2 Target Service](docs/CHAOS_COMMAND_RELAY_APPROACH.md#92-target-service-embedding-checklist)
-5. Add the target's `spring.application.name` to the relay allowlist
+1. Add dependency `com.samba.chaos:chaos-command-spring-boot-starter`. Chaos Monkey, the actuator, and AspectJ come with it.
+2. Set `samba.chaos.command.enabled=true` outside production, and point `spring.security.oauth2.resourceserver.jwt.issuer-uri` / `jwk-set-uri` at the auth server. The starter secures only `/internal/chaos/**` with scope `chaos.command`, so the host still declares a `SecurityFilterChain` for its own routes.
+3. Add the target's `spring.application.name` to `chaos.relay.allowed-target-applications`. The console lists that allowlist.
 
 ## Tests
 

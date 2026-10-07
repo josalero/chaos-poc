@@ -33,7 +33,7 @@ sequenceDiagram
     Note over Auth: generates an RSA signing key<br/>and registers the relay client
     Target->>Config: GET config (application.yml + {app}.yml)
     Target->>Eureka: register with prefer-ip-address (one entry per container)
-    Note over Target: chaos-lib active when profile is test or chaos-monkey<br/>and samba.chaos.command.enabled=true
+    Note over Target: chaos command starter active when<br/>samba.chaos.command.enabled=true
     Relay->>Config: GET config
     Relay->>Eureka: register, then fetch the registry every 5s
     Gateway->>Config: GET routes
@@ -187,7 +187,7 @@ Exception assault (`scenarios/exception-http-404.json`). `exception` is the Chao
 
 ## 3. Inside one instance (chaos-lib)
 
-Spring Security runs before the controller. The chaos-lib filter chain only matches `/internal/chaos/**` and checks the JWT signature, expiry, and issuer. `@PreAuthorize` then checks the scope. The applier rejects commands meant for another environment or application, returns the stored result for a repeated `commandId`, and drives the Chaos Monkey actuator on loopback.
+Spring Security runs before the controller. The starter filter chain only matches `/internal/chaos/**`, checks the JWT signature, expiry, and issuer, and requires scope `chaos.command`. The applier rejects commands meant for another environment or application, returns the stored result for a repeated `commandId`, and drives the Chaos Monkey actuator on loopback.
 
 ```mermaid
 sequenceDiagram

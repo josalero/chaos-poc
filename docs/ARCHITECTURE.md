@@ -167,9 +167,9 @@ Arrows are in-process calls except the four that leave the relay: `TargetInstanc
 | `chaos-poc-downstream` | Inventory and authorization target | Spring Boot |
 | `chaos-poc-ui` | Static verify UI | nginx, React |
 
-Packages follow the same layers in each module: `config`, `web`, `service`, and where the module needs them `client`, `model`, `store`, `repository`, `command`, and `exception`. `ChaosAutoConfiguration` stays in `com.samba.chaos` so component scan covers the library subpackages. Relay classes that probe the actuator or reset configuration stay in `com.samba.chaos.relay.console` because the API uses them. The browser UI does not.
+Packages follow the same layers in each module: `config`, `web`, `service`, and where the module needs them `client`, `model`, `store`, `repository`, `command`, and `exception`. `ChaosAutoConfiguration` stays in `com.samba.chaos` and registers its beans explicitly. Relay classes that probe the actuator or reset configuration stay in `com.samba.chaos.relay.console` because the API uses them. The browser UI does not.
 
-chaos-lib is active when the profile is `test` or `chaos-monkey` and `samba.chaos.command.enabled=true`. Its security filter chain matches only `/internal/chaos/**`. Each host declares its own chain for the rest of its routes.
+The starter artifact is `com.samba.chaos:chaos-command-spring-boot-starter`. It is active when `samba.chaos.command.enabled=true`. Its security filter chain matches only `/internal/chaos/**`. Each host declares its own chain for the rest of its routes. The relay allowlist remains the set of services the console shows.
 
 ## 5. Apply a command
 

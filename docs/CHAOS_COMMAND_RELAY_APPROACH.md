@@ -4,7 +4,7 @@
 
 The relay submits a chaos command by asking Eureka for every UP instance of the target application and POSTing the command to each instance. The HTTP response is that instance's result. There is no message broker.
 
-Each push carries a short-lived JWT issued by the local `auth-server` (`client_credentials`, scope `chaos.command`). chaos-lib validates it as an OAuth2 resource server and authorizes the endpoint with `@PreAuthorize`.
+Each push carries a short-lived JWT issued by the local `auth-server` (`client_credentials`, scope `chaos.command`). The starter validates it as an OAuth2 resource server and authorizes `/internal/chaos/**` with `SCOPE_chaos.command`.
 
 The public entry point is the Spring Cloud Gateway. nginx only serves the static verify UI. Runtime settings live in `config-repo/` and are served by the config server.
 
@@ -52,7 +52,7 @@ Relay → POST /internal/v1/chaos/commands
   → DiscoveryClient (UP instances only)
   → relay gets a client_credentials JWT from auth-server :9000 (cached until expiry)
   → async POST {instance}/internal/chaos/commands  (Authorization: Bearer <jwt>)
-  → chaos-lib validates the JWT, @PreAuthorize checks SCOPE_chaos.command
+  → chaos-lib validates the JWT and the filter chain checks SCOPE_chaos.command
   → chaos-lib applies the actuator on 127.0.0.1
   → response body is the instance result
 
@@ -156,11 +156,11 @@ A mismatched environment or application, a missing expiry, or an already-expired
 
 ## 5. Chaos Library (`chaos-lib`)
 
-Maven artifact `com.samba.chaos:chaos-lib`. Packages follow the same layers as the other modules: `config` (properties, security, retry), `web` (the command endpoint), `service` (apply, actuator, expiry, metrics), `command` (the JSON contract), and `exception`. `ChaosAutoConfiguration` stays in `com.samba.chaos` so component scan covers those packages.
+Maven artifact `com.samba.chaos:chaos-command-spring-boot-starter` (module directory `chaos-lib`). Packages follow the same layers as the other modules: `config` (properties, security, retry), `web` (the command endpoint), `service` (apply, actuator, expiry, metrics), `command` (the JSON contract), and `exception`. `ChaosAutoConfiguration` stays in `com.samba.chaos` and registers its beans explicitly.
 
-Active when the profile is `test` or `chaos-monkey` and `samba.chaos.command.enabled=true`.
+Active when `samba.chaos.command.enabled=true`. The flag defaults to false, so the relay can depend on the starter for the JSON contract without opening the endpoint. When the flag is true, an environment post-processor adds the `chaos-monkey` profile (Chaos Monkey 4 will not load without it), applies idle Chaos Monkey defaults, and refuses to start if the profile or `samba.chaos.command.environment` is production.
 
-The library registers its own `SecurityFilterChain`, matched only on `/internal/chaos/**` and ordered first. It is an OAuth2 resource server: Boot builds the `JwtDecoder` from the host's `spring.security.oauth2.resourceserver.jwt.issuer-uri` and `jwk-set-uri`. `ChaosCommandEndpoint.apply` is guarded with `@PreAuthorize("hasAuthority('SCOPE_chaos.command')")`. Host routes are untouched, but because Spring Security is on the classpath the host must declare its own chain for its other routes (the demo apps declare a `permitAll` chain). Idempotent repeats return the previous result and do not reapply the assault.
+The library registers its own `SecurityFilterChain`, matched only on `/internal/chaos/**` and ordered first. It is an OAuth2 resource server: Boot builds the `JwtDecoder` from the host's `spring.security.oauth2.resourceserver.jwt.issuer-uri` and `jwk-set-uri`. The chain requires `SCOPE_chaos.command`. Host routes are untouched, but because Spring Security is on the classpath the host must declare its own chain for its other routes (the demo apps declare a `permitAll` chain). Idempotent repeats return the previous result and do not reapply the assault.
 
 Actuator calls use `RestClient` and Framework 7 `RetryTemplate` (`FixedBackOff`). 503, 504, and connection failures retry. Other HTTP statuses become `ACTUATOR_ERROR`.
 
@@ -172,13 +172,10 @@ Fan-out uses `ChaosCommandClient`, a `@FeignClient`. Each call passes the discov
 
 ## 9.2 Target Service (embedding checklist)
 
-1. Depend on `chaos-lib`.
-2. Depend on `spring-boot-starter-actuator`, `spring-boot-starter-aspectj`, and `chaos-monkey-spring-boot` in the host service.
-3. Set `samba.chaos.command.enabled=true` and `spring.security.oauth2.resourceserver.jwt.issuer-uri` / `jwk-set-uri` for the issuer the relay uses.
-4. Declare a `SecurityFilterChain` for the host's own routes (chaos-lib only secures `/internal/chaos/**`).
-5. Expose the Chaos Monkey actuator (`management.endpoint.chaosmonkey.access: unrestricted`).
-6. Register with Eureka under the name the relay allowlist uses.
-7. Run with profile `test` or `chaos-monkey`.
+1. Depend on `com.samba.chaos:chaos-command-spring-boot-starter`.
+2. Set `samba.chaos.command.enabled=true` and `spring.security.oauth2.resourceserver.jwt.issuer-uri` / `jwk-set-uri` for the issuer the relay uses. Do not enable this in production.
+3. Declare a `SecurityFilterChain` for the host's own routes (the starter only secures `/internal/chaos/**`).
+4. Register with Eureka under the name in `chaos.relay.allowed-target-applications`.
 
 ## 11. Test scenarios and isolation model
 
