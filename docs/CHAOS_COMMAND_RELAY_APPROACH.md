@@ -136,7 +136,7 @@ A mismatched environment or application, a missing expiry, or an already-expired
 | --- | --- |
 | `commandId` | Same id as the request |
 | `targetApplication` | Echo |
-| `podName` | `samba.chaos.command.pod-name` (`HOSTNAME` in Compose) |
+| `podName` | `samba.chaos.command.pod-name`, set to `spring.application.name` |
 | `outcome` | `SUCCESS`, `ACTUATOR_ERROR`, `REJECTED`, or `UNREACHABLE` |
 | `failedStep` | Actuator path that failed |
 | `httpStatus` | Status from the failed actuator call, or 409 when rejected |
@@ -218,3 +218,26 @@ Removed in this release, with no compatibility shim:
 Commands are authorized with short-lived (5 minute) JWTs from `auth-server`. The relay authenticates to it with `client_secret_basic`; the secret is `CHAOS_RELAY_CLIENT_SECRET` (POC default `local-poc-only`, set on both `chaos-auth-server` and `chaos-command-relay`). The signing key is generated at auth-server startup, so restarting it invalidates outstanding tokens; resource servers refetch the JWK set on an unknown key id. `CHAOS_AUTH_ISSUER` must be identical on the auth server and the resource servers because it is checked against the `iss` claim. Do not log tokens or the client secret.
 
 Known gaps: the operator console and submit API have no inbound authentication, and the Chaos Monkey actuator (`/actuator/chaosmonkey`) on each instance is still open, so it can be called directly without a JWT. Do not log driver or customer identifiers; this POC does not process that data, and the platform rule still applies to anything added later.
+
+## Operator console
+
+The console is the control plane for `chaos.relay.allowed-target-applications`. The verify UI remains the data-plane observer. **Postman collection** in the console rail downloads `chaos-command-relay.postman_collection.json`. Its `baseUrl` defaults to `http://localhost:18000/api/relay`.
+
+| Page | Route | What it shows |
+| --- | --- | --- |
+| Services | `/chaos/` | Allowlisted services, Chaos Monkey on/off/unknown, config state, UP count, last command. The browser filters, sorts, and pages that list. |
+| Service | `/chaos/services/{name}` | Overview, command history, live actuator (one card per UP instance, refreshed every 5 seconds while the section is open), and Apply. |
+| Commands | `/chaos/commands` | Every stored command, newest first. |
+| Saved | `/chaos/saved` | Every per-service catalog row. Apply opens that service with the assault filled in. |
+
+`GET /internal/v1/chaos/services` reads the latest stored command and a background cache of `GET /actuator/chaosmonkey/status`. It does not call the actuator. `cmEnabled` is null until a pod has answered, and the list shows unknown. The service page and its actuator section still probe live. The actuator snapshot includes `instances`, one row per UP instance.
+
+`GET /internal/v1/chaos/commands` pages stored commands (`page`, `size` default 50 and at most 200, optional `application`, `status`, and `action`). Status is computed when the page is read. `GET /internal/v1/chaos/catalog` lists saved assaults for the allowlist, with an optional `application` filter.
+
+Command history is an H2 file (`CHAOS_RELAY_DATA_DIR`, Compose volume `chaos-relay-data`). Records stay until someone deletes the volume. Stored fields are command metadata and operator names such as `chaos-console`.
+
+Per-pod results are keyed by the Eureka instance id the relay dispatched to. Two replicas that both report `podName` equal to `spring.application.name` still produce two results.
+
+Each service also has a catalog in the same H2 file. `GET` and `POST /internal/v1/chaos/services/{name}/catalog` list and save a label, action, and assault. Saving the same label again replaces that entry. `DELETE .../catalog/{catalogId}` removes one. Apply still uses `POST /internal/v1/chaos/commands`. The Apply form can save the assault and then publish it.
+
+`POST /internal/v1/chaos/services/reset` takes `{ "issuedBy", "applicationNames" }`. An empty list or a name outside the allowlist is 400 and publishes nothing. Otherwise the relay returns 202 with one command id per name and does not wait. The one-service reset still waits. Presets with no `targetApplication` are templates and can be applied to any allowlisted name.

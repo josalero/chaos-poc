@@ -52,4 +52,18 @@ public class HttpClientConfig {
     executor.setConcurrencyLimit(32);
     return executor;
   }
+
+  /**
+   * Executor for actuator status probes. Separate from command dispatch so a reset cannot fill the
+   * pool that command fan-out needs.
+   *
+   * @return virtual-thread executor limited to 16 concurrent probes
+   */
+  @Bean(name = "chaosProbeExecutor")
+  TaskExecutor chaosProbeExecutor() {
+    SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor("chaos-probe-");
+    executor.setVirtualThreads(true);
+    executor.setConcurrencyLimit(16);
+    return executor;
+  }
 }

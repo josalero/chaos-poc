@@ -2,6 +2,7 @@ package com.samba.chaos.relay.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -44,7 +45,7 @@ class ChaosServiceMaintenanceServiceTest {
             List.of(
                 new ChaosInstanceStatus(
                     "pod-a", InstanceOutcome.SUCCESS, Instant.now(), null, 200)));
-    when(store.findAll()).thenReturn(List.of(configured));
+    when(store.findByApplicationAndActions(eq("orders"), any())).thenReturn(List.of(configured));
     when(statusService.aggregateStatus(configured)).thenReturn(CommandAggregateStatus.APPLIED);
     UUID commandId = UUID.randomUUID();
     when(commandService.submit(any()))
@@ -71,11 +72,11 @@ class ChaosServiceMaintenanceServiceTest {
 
   @Test
   void enableRejectsWhenNoPriorAssaultExists() {
+    ChaosCommandStore store = mock(ChaosCommandStore.class);
+    when(store.findByApplicationAndActions(any(), any())).thenReturn(List.of());
     ChaosServiceMaintenanceService service =
         new ChaosServiceMaintenanceService(
-            mock(ChaosCommandService.class),
-            mock(ChaosCommandStore.class),
-            mock(ChaosCommandStatusService.class));
+            mock(ChaosCommandService.class), store, mock(ChaosCommandStatusService.class));
 
     assertThat(
             service.enable(
@@ -101,7 +102,7 @@ class ChaosServiceMaintenanceServiceTest {
             null,
             assault,
             List.of());
-    when(store.findAll()).thenReturn(List.of(configured));
+    when(store.findByApplicationAndActions(eq("orders"), any())).thenReturn(List.of(configured));
     when(statusService.aggregateStatus(configured)).thenReturn(CommandAggregateStatus.APPLIED);
     ChaosServiceMaintenanceService service =
         new ChaosServiceMaintenanceService(mock(ChaosCommandService.class), store, statusService);

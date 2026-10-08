@@ -1,31 +1,37 @@
 package com.samba.chaos.relay.web;
 
 import com.samba.chaos.relay.console.ChaosConfigurationResetService;
-import com.samba.chaos.relay.console.ChaosConfigurationResetService.ResetConfigurationResult;
 import com.samba.chaos.relay.console.ChaosMonkeyRuntimeSnapshot;
+import com.samba.chaos.relay.model.ChaosCatalogEntry;
+import com.samba.chaos.relay.model.ChaosCatalogSaveRequest;
 import com.samba.chaos.relay.model.ChaosClearDemoDataResponse;
 import com.samba.chaos.relay.model.ChaosCommandRequest;
 import com.samba.chaos.relay.model.ChaosCommandStatusResponse;
-import com.samba.chaos.relay.model.ChaosConfigurationResetAllResponse;
 import com.samba.chaos.relay.model.ChaosConfigurationResetResponse;
 import com.samba.chaos.relay.model.ChaosMaintenanceRequest;
+import com.samba.chaos.relay.model.ChaosResetSelectionRequest;
+import com.samba.chaos.relay.model.ChaosResetSelectionResponse;
 import com.samba.chaos.relay.model.ChaosServiceStatusResponse;
 import com.samba.chaos.relay.model.ChaosServiceStatusSummary;
 import com.samba.chaos.relay.model.CommandAggregateStatus;
 import com.samba.chaos.relay.model.ValidationErrorResponse;
+import com.samba.chaos.relay.service.ChaosCatalogService;
 import com.samba.chaos.relay.service.ChaosCommandService;
 import com.samba.chaos.relay.service.ChaosCommandValidator;
 import com.samba.chaos.relay.service.ChaosServiceMaintenanceService;
 import com.samba.chaos.relay.service.ChaosServiceStatusService;
 import jakarta.validation.Valid;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -35,18 +41,21 @@ import org.springframework.web.bind.annotation.RestController;
  * GET  /internal/v1/chaos/services
  * GET  /internal/v1/chaos/services/{applicationName}
  * GET  /internal/v1/chaos/services/{applicationName}/history
+ * GET  /internal/v1/chaos/services/{applicationName}/catalog
+ * POST /internal/v1/chaos/services/{applicationName}/catalog
+ * DELETE /internal/v1/chaos/services/{applicationName}/catalog/{catalogId}
  * GET  /internal/v1/chaos/services/{applicationName}/actuator
  * POST /internal/v1/chaos/services/{applicationName}/enable
  * POST /internal/v1/chaos/services/{applicationName}/disable
  * POST /internal/v1/chaos/services/{applicationName}/reset
  * POST /internal/v1/chaos/services/{applicationName}/clear-demo-data
  * POST /internal/v1/chaos/services/{applicationName}/commands
- * POST /internal/v1/chaos/services/reset-all
+ * POST /internal/v1/chaos/services/reset
  * </pre>
  *
- * <p>An unknown allowlist name is 404. Enable and disable return 202. Reset waits for a terminal
- * aggregate: 200 when {@code APPLIED}, 409 otherwise. Reset-all always returns 200 with one outcome
- * per allowlisted service. Clear-demo-data does not change the Chaos Monkey assault.
+ * <p>An unknown allowlist name is 404. Enable and disable return 202. The one-service reset waits
+ * for a terminal aggregate: 200 when {@code APPLIED}, 409 otherwise. Selected reset returns 202
+ * without waiting. Clear-demo-data does not change the Chaos Monkey assault.
  */
 @RestController
 @RequestMapping("/internal/v1/chaos/services")
@@ -56,6 +65,7 @@ public class ChaosServiceController {
   private final ChaosServiceMaintenanceService maintenanceService;
   private final ChaosConfigurationResetService configurationResetService;
   private final ChaosCommandService commandService;
+  private final ChaosCatalogService catalogService;
   private final ChaosCommandValidator validator;
 
   /**
@@ -65,6 +75,7 @@ public class ChaosServiceController {
    * @param maintenanceService enable and disable
    * @param configurationResetService reset that waits for {@code APPLIED}
    * @param commandService command submit for one service path
+   * @param catalogService saved scenarios for one service
    * @param validator maps field errors onto the error body
    */
   public ChaosServiceController(
@@ -72,11 +83,13 @@ public class ChaosServiceController {
       ChaosServiceMaintenanceService maintenanceService,
       ChaosConfigurationResetService configurationResetService,
       ChaosCommandService commandService,
+      ChaosCatalogService catalogService,
       ChaosCommandValidator validator) {
     this.statusService = statusService;
     this.maintenanceService = maintenanceService;
     this.configurationResetService = configurationResetService;
     this.commandService = commandService;
+    this.catalogService = catalogService;
     this.validator = validator;
   }
 
@@ -116,10 +129,58 @@ public class ChaosServiceController {
    */
   @GetMapping("/{applicationName}/history")
   public ResponseEntity<List<ChaosCommandStatusResponse>> getServiceHistory(
-      @PathVariable String applicationName) {
+      @PathVariable String applicationName,
+      @RequestParam(name = "limit", defaultValue = "50") int limit) {
     return statusService
-        .getHistory(applicationName)
+        .getHistory(applicationName, limit)
         .map(ResponseEntity::ok)
+        .orElseGet(() -> ResponseEntity.notFound().build());
+  }
+
+  /**
+   * Lists saved scenarios for one service.
+   *
+   * @param applicationName allowlisted Eureka application name
+   * @return 200 with the catalog, or 404 when the name is not allowlisted
+   */
+  @GetMapping("/{applicationName}/catalog")
+  public ResponseEntity<List<ChaosCatalogEntry>> listCatalog(@PathVariable String applicationName) {
+    return catalogService
+        .list(applicationName)
+        .map(ResponseEntity::ok)
+        .orElseGet(() -> ResponseEntity.notFound().build());
+  }
+
+  /**
+   * Saves a scenario under a label. The same label replaces the stored action and assault.
+   *
+   * @param applicationName allowlisted Eureka application name
+   * @param request label, action, and assault
+   * @return 200 with the saved entry, or 404 when the name is not allowlisted
+   */
+  @PostMapping("/{applicationName}/catalog")
+  public ResponseEntity<ChaosCatalogEntry> saveCatalog(
+      @PathVariable String applicationName, @Valid @RequestBody ChaosCatalogSaveRequest request) {
+    return catalogService
+        .save(applicationName, request)
+        .map(ResponseEntity::ok)
+        .orElseGet(() -> ResponseEntity.notFound().build());
+  }
+
+  /**
+   * Removes one saved scenario from a service.
+   *
+   * @param applicationName allowlisted Eureka application name
+   * @param catalogId catalog id
+   * @return 204 when deleted, 404 when the name or id is unknown
+   */
+  @DeleteMapping("/{applicationName}/catalog/{catalogId}")
+  public ResponseEntity<Void> deleteCatalog(
+      @PathVariable String applicationName, @PathVariable UUID catalogId) {
+    return catalogService
+        .delete(applicationName, catalogId)
+        .filter(Boolean::booleanValue)
+        .map(deleted -> ResponseEntity.noContent().<Void>build())
         .orElseGet(() -> ResponseEntity.notFound().build());
   }
 
@@ -211,16 +272,31 @@ public class ChaosServiceController {
   }
 
   /**
-   * Resets each allowlisted service in order. The HTTP status stays 200 when some services fail.
+   * Publishes a disable command for each selected service and returns without waiting.
    *
-   * @param request issuer applied to every service
-   * @return one outcome per allowlisted application
+   * @param request selected names and the operator
+   * @return 202 with one entry per name, or 400 when the selection publishes nothing
    */
-  @PostMapping("/reset-all")
-  public ResponseEntity<?> resetAll(@Valid @RequestBody ChaosMaintenanceRequest request) {
-    ChaosConfigurationResetService.ResetAllConfigurationResult result =
-        configurationResetService.resetAllConfigurations(request);
-    return ResponseEntity.ok(toResetAllResponse(result));
+  @PostMapping("/reset")
+  public ResponseEntity<?> resetSelected(@Valid @RequestBody ChaosResetSelectionRequest request) {
+    ChaosConfigurationResetService.ResetSelectionResult result =
+        configurationResetService.resetSelected(request.issuedBy(), request.applicationNames());
+    if (result instanceof ChaosConfigurationResetService.ResetSelectionResult.Rejected rejected) {
+      return ResponseEntity.badRequest().body(validator.toErrorResponse(rejected.errors()));
+    }
+    ChaosConfigurationResetService.ResetSelectionResult.Accepted accepted =
+        (ChaosConfigurationResetService.ResetSelectionResult.Accepted) result;
+    List<ChaosResetSelectionResponse.ServiceReset> services =
+        accepted.services().stream()
+            .map(
+                service ->
+                    new ChaosResetSelectionResponse.ServiceReset(
+                        service.applicationName(),
+                        service.commandId(),
+                        service.statusUrl(),
+                        service.errors()))
+            .toList();
+    return ResponseEntity.accepted().body(new ChaosResetSelectionResponse(services));
   }
 
   /**
@@ -268,38 +344,6 @@ public class ChaosServiceController {
       case ChaosConfigurationResetService.ResetConfigurationResult.CommandNotApplied failed ->
           ResponseEntity.status(HttpStatus.CONFLICT)
               .body(new ChaosConfigurationResetResponse(failed.commandId(), failed.status()));
-    };
-  }
-
-  private ChaosConfigurationResetAllResponse toResetAllResponse(
-      ChaosConfigurationResetService.ResetAllConfigurationResult result) {
-    List<ChaosConfigurationResetAllResponse.ServiceResetOutcome> services =
-        result.outcomes().stream().map(this::toServiceResetOutcome).toList();
-    return new ChaosConfigurationResetAllResponse(
-        result.successCount(), result.outcomes().size(), services);
-  }
-
-  private ChaosConfigurationResetAllResponse.ServiceResetOutcome toServiceResetOutcome(
-      ChaosConfigurationResetService.ResetAllConfigurationResult.ServiceResetOutcome outcome) {
-    ResetConfigurationResult resetResult = outcome.result();
-    return switch (resetResult) {
-      case ResetConfigurationResult.Success success ->
-          new ChaosConfigurationResetAllResponse.ServiceResetOutcome(
-              outcome.applicationName(),
-              success.commandId(),
-              CommandAggregateStatus.APPLIED,
-              List.of());
-      case ResetConfigurationResult.Rejected rejected ->
-          new ChaosConfigurationResetAllResponse.ServiceResetOutcome(
-              outcome.applicationName(), null, CommandAggregateStatus.FAILED, rejected.errors());
-      case ResetConfigurationResult.CommandNotApplied failed ->
-          new ChaosConfigurationResetAllResponse.ServiceResetOutcome(
-              outcome.applicationName(),
-              failed.commandId(),
-              failed.status(),
-              List.of(
-                  new ValidationErrorResponse.FieldError(
-                      "command", "disable command finished with status " + failed.status())));
     };
   }
 

@@ -1,13 +1,14 @@
 package com.samba.chaos.relay.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import com.samba.chaos.command.ChaosCommandAction;
 import com.samba.chaos.command.InstanceOutcome;
 import com.samba.chaos.relay.config.ChaosRelayProperties;
 import com.samba.chaos.relay.model.CommandAggregateStatus;
+import com.samba.chaos.relay.store.ChaosCommandStore;
 import com.samba.chaos.relay.store.CommandRecord;
-import com.samba.chaos.relay.store.InMemoryChaosCommandStore;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -23,7 +24,7 @@ class ChaosCommandStatusServiceTest {
   void setUp() {
     properties = new ChaosRelayProperties();
     properties.setStatusTimeoutSeconds(30);
-    statusService = new ChaosCommandStatusService(new InMemoryChaosCommandStore(), properties);
+    statusService = new ChaosCommandStatusService(mock(ChaosCommandStore.class), properties);
   }
 
   @Test

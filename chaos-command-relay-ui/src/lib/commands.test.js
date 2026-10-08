@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { commandFromForm, commandFromPreset, commandRequestJson } from './commands.js';
+import { commandFromCatalog, commandFromForm, commandFromPreset, commandRequestJson } from './commands.js';
 
 describe('commandRequestJson', () => {
   it('rebuilds an ALL command and omits instance ids', () => {
@@ -87,6 +87,36 @@ describe('commandFromPreset', () => {
     expect(command.expiresAt).toBeNull();
     expect(command.issuedBy).toBe('chaos-console');
     expect(command.correlationId).toBe('quick-disable');
+  });
+
+  it('fills the target when the preset is a template', () => {
+    const command = commandFromPreset(
+      { id: 'template-latency', action: 'CONFIGURE_AND_ENABLE', assault: { latencyActive: true } },
+      new Date('2026-10-06T12:00:00.000Z'),
+      'orders',
+    );
+
+    expect(command.targetApplication).toBe('orders');
+  });
+});
+
+describe('commandFromCatalog', () => {
+  it('builds an apply payload for the service that owns the entry', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-06T12:00:00.000Z'));
+    const command = commandFromCatalog({
+      catalogId: 'catalog-1',
+      targetApplication: 'orders',
+      action: 'CONFIGURE_AND_ENABLE',
+      assault: { level: 1, latencyActive: true },
+    });
+
+    expect(command.targetApplication).toBe('orders');
+    expect(command.action).toBe('CONFIGURE_AND_ENABLE');
+    expect(command.assault).toEqual({ level: 1, latencyActive: true });
+    expect(command.expiresAt).toBe('2026-10-06T14:00:00.000Z');
+    expect(command.correlationId).toBe('quick-catalog-1');
+    vi.useRealTimers();
   });
 });
 

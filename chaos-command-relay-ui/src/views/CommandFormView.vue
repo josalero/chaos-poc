@@ -1,63 +1,127 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
-import { getService, submitCommand } from '../api/relayClient.js';
-import Notices from '../components/Notices.vue';
+import { useRouter } from 'vue-router';
+import { getService, listCatalog, saveCatalog, submitCommand } from '../api/relayClient.js';
 import { commandFromForm, leaseExpiresAt } from '../lib/commands.js';
 import { errorMessages } from '../lib/errors.js';
 import { showErrors } from '../lib/notices.js';
-import { presets } from '../presets/catalog.js';
+import { presetsFor } from '../presets/catalog.js';
 
-const route = useRoute();
+const props = defineProps({
+  applicationName: { type: String, required: true },
+  catalogId: { type: String, default: '' },
+});
+
 const router = useRouter();
-const targets = [...new Set(presets.map((preset) => preset.targetApplication))];
 const actions = ['CONFIGURE_AND_ENABLE', 'CONFIGURE', 'ENABLE', 'DISABLE'];
 const publishing = ref(false);
 const parseError = ref('');
-
-const form = ref({
-  targetApplication: route.query.applicationName || targets[0] || '',
-  action: 'CONFIGURE_AND_ENABLE',
-  issuedBy: 'chaos-console',
-  correlationId: '',
-  expiresAt: leaseExpiresAt(),
-  presetId: '',
-  assaultJson: '',
-  instanceSelection: route.query.instanceSelection === 'SOME' ? 'SOME' : 'ALL',
-  instanceIds: [],
-});
+const catalog = ref([]);
+const selectedCatalogId = ref('');
+const saveToCatalog = ref(false);
+const saveLabel = ref('');
 const upInstanceIds = ref([]);
 
-const selectedPreset = computed(() => presets.find((preset) => preset.id === form.value.presetId) || null);
+const form = ref(emptyForm(props.applicationName));
 
-watch(selectedPreset, (preset) => {
-  if (!preset || form.value.assaultJson.trim()) return;
-  form.value.action = preset.action;
-  form.value.targetApplication = preset.targetApplication;
-});
+const availablePresets = computed(() => presetsFor(props.applicationName));
+const selectedPreset = computed(
+  () => availablePresets.value.find((preset) => preset.id === form.value.presetId) || null,
+);
 
 watch(
-  () => form.value.targetApplication,
+  () => props.applicationName,
   async (applicationName) => {
-    form.value.instanceIds = [];
-    if (!applicationName) {
-      upInstanceIds.value = [];
-      return;
-    }
-    try {
-      const service = await getService(applicationName);
-      upInstanceIds.value = service.upInstanceIds || [];
-    } catch {
-      upInstanceIds.value = [];
-    }
+    form.value = emptyForm(applicationName);
+    selectedCatalogId.value = '';
+    saveToCatalog.value = false;
+    saveLabel.value = '';
+    await loadCatalog();
+    await loadInstances(applicationName);
   },
   { immediate: true },
 );
+
+watch(
+  () => catalogEntry(props.catalogId),
+  (entry) => {
+    if (entry) {
+      fillFromCatalog(entry);
+    }
+  },
+);
+
+function emptyForm(applicationName) {
+  return {
+    targetApplication: applicationName,
+    action: 'CONFIGURE_AND_ENABLE',
+    issuedBy: 'chaos-console',
+    correlationId: '',
+    expiresAt: leaseExpiresAt(),
+    presetId: '',
+    assaultJson: '',
+    instanceSelection: 'ALL',
+    instanceIds: [],
+  };
+}
+
+function catalogEntry(catalogId) {
+  return catalog.value.find((entry) => entry.catalogId === catalogId) || null;
+}
+
+async function loadCatalog() {
+  catalog.value = await listCatalog(props.applicationName).catch(() => []);
+  const entry = catalogEntry(props.catalogId);
+  if (entry) {
+    fillFromCatalog(entry);
+  }
+}
+
+async function loadInstances(applicationName) {
+  form.value.instanceIds = [];
+  try {
+    const service = await getService(applicationName);
+    upInstanceIds.value = service.upInstanceIds || [];
+  } catch {
+    upInstanceIds.value = [];
+  }
+}
+
+function onPreset() {
+  const preset = selectedPreset.value;
+  if (!preset) {
+    return;
+  }
+  selectedCatalogId.value = '';
+  form.value.action = preset.action;
+  form.value.assaultJson = preset.assault ? JSON.stringify(preset.assault, null, 2) : '';
+  form.value.expiresAt = preset.action === 'DISABLE' ? '' : leaseExpiresAt();
+}
+
+function onCatalogChange() {
+  const entry = catalogEntry(selectedCatalogId.value);
+  if (entry) {
+    fillFromCatalog(entry);
+  }
+}
+
+function fillFromCatalog(entry) {
+  selectedCatalogId.value = entry.catalogId;
+  form.value.presetId = '';
+  form.value.action = entry.action;
+  form.value.assaultJson = entry.assault ? JSON.stringify(entry.assault, null, 2) : '';
+  form.value.expiresAt = entry.action === 'DISABLE' ? '' : leaseExpiresAt();
+  saveLabel.value = entry.label;
+}
 
 async function publish() {
   parseError.value = '';
   if (form.value.instanceSelection === 'SOME' && form.value.instanceIds.length === 0) {
     parseError.value = 'Select at least one instance.';
+    return;
+  }
+  if (saveToCatalog.value && !saveLabel.value.trim()) {
+    parseError.value = 'Enter a name to save this assault on the service.';
     return;
   }
   let command;
@@ -69,6 +133,13 @@ async function publish() {
   }
   publishing.value = true;
   try {
+    if (saveToCatalog.value) {
+      await saveCatalog(props.applicationName, {
+        label: saveLabel.value.trim(),
+        action: command.action,
+        assault: command.assault,
+      });
+    }
     const submitted = await submitCommand(command);
     await router.push({ name: 'command', params: { commandId: submitted.commandId } });
   } catch (error) {
@@ -80,65 +151,70 @@ async function publish() {
 </script>
 
 <template>
-  <RouterLink class="text-sm text-stone-600 underline" to="/">Back to scenarios</RouterLink>
-  <header class="mt-4">
-    <p class="text-xs font-semibold tracking-widest text-orange-800">ADVANCED</p>
-    <h1 class="text-3xl font-semibold">Manual patch</h1>
-    <p class="mt-1 text-stone-600">Prefer scenarios on the home page unless you need custom assault JSON.</p>
-  </header>
-  <Notices />
-  <p v-if="parseError" class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900" role="alert">{{ parseError }}</p>
-
-  <form class="rounded-xl border border-stone-200 bg-white p-5" @submit.prevent="publish">
-    <div class="grid gap-4">
-      <label class="text-sm font-medium" for="targetApplication">Target
-        <select id="targetApplication" v-model="form.targetApplication" required class="mt-1 w-full rounded-md border border-stone-300 px-3 py-2">
-          <option v-for="target in targets" :key="target" :value="target">{{ target }}</option>
-        </select>
-      </label>
-      <fieldset class="text-sm font-medium">
-        <legend>Instances</legend>
-        <div class="mt-1 flex gap-4 font-normal">
-          <label><input v-model="form.instanceSelection" type="radio" value="ALL" /> All UP instances</label>
-          <label><input v-model="form.instanceSelection" type="radio" value="SOME" /> Some instances</label>
-        </div>
-        <div v-if="form.instanceSelection === 'SOME'" class="mt-2 grid gap-1 font-normal">
-          <p v-if="!upInstanceIds.length" class="text-stone-500">No UP instances are registered for this target.</p>
-          <label v-for="instanceId in upInstanceIds" :key="instanceId" class="font-mono text-xs">
-            <input v-model="form.instanceIds" type="checkbox" :value="instanceId" />
-            {{ instanceId }}
+  <p v-if="parseError" class="alert alert-error" role="alert">{{ parseError }}</p>
+  <form class="panel panel-pad" @submit.prevent="publish">
+    <div class="split">
+      <div class="stack">
+        <label class="field" for="saved-assault">Saved assault
+          <select id="saved-assault" v-model="selectedCatalogId" @change="onCatalogChange">
+            <option value="">Manual assault</option>
+            <option v-for="entry in catalog" :key="entry.catalogId" :value="entry.catalogId">{{ entry.label }}</option>
+          </select>
+        </label>
+        <label class="field" for="presetId">Preset
+          <select id="presetId" v-model="form.presetId" @change="onPreset">
+            <option value="">Custom assault JSON below</option>
+            <option v-for="preset in availablePresets" :key="preset.id" :value="preset.id">{{ preset.label }}</option>
+          </select>
+        </label>
+        <label class="field" for="action">Action
+          <select id="action" v-model="form.action" required>
+            <option v-for="action in actions" :key="action" :value="action">{{ action }}</option>
+          </select>
+        </label>
+        <label class="field" for="assaultJson">Assault JSON
+          <textarea id="assaultJson" v-model="form.assaultJson" rows="8" class="mono" placeholder='{"level":1,"exceptionsActive":true}'></textarea>
+        </label>
+      </div>
+      <div class="stack">
+        <p>Target <strong class="mono">{{ applicationName }}</strong></p>
+        <fieldset>
+          <legend>Instances</legend>
+          <div class="button-row">
+            <label class="check-row"><input v-model="form.instanceSelection" type="radio" value="ALL" /> All UP instances</label>
+            <label class="check-row"><input v-model="form.instanceSelection" type="radio" value="SOME" /> Some instances</label>
+          </div>
+          <div v-if="form.instanceSelection === 'SOME'" class="stack">
+            <p v-if="!upInstanceIds.length" class="meta">No UP instances are registered for this target.</p>
+            <label v-for="instanceId in upInstanceIds" :key="instanceId" class="check-row mono">
+              <input v-model="form.instanceIds" type="checkbox" :value="instanceId" />
+              {{ instanceId }}
+            </label>
+          </div>
+        </fieldset>
+        <label class="field" for="issuedBy">Issued by
+          <input id="issuedBy" v-model="form.issuedBy" required autocomplete="off" />
+        </label>
+        <label class="field" for="correlationId">Correlation ID
+          <input id="correlationId" v-model="form.correlationId" autocomplete="off" placeholder="Optional" />
+        </label>
+        <label class="field" for="expiresAt">Expires at
+          <input id="expiresAt" v-model="form.expiresAt" placeholder="2026-10-06T18:00:00Z" />
+        </label>
+        <fieldset>
+          <label class="check-row">
+            <input v-model="saveToCatalog" type="checkbox" />
+            Save to this service
           </label>
-        </div>
-      </fieldset>
-      <label class="text-sm font-medium" for="action">Action
-        <select id="action" v-model="form.action" required class="mt-1 w-full rounded-md border border-stone-300 px-3 py-2">
-          <option v-for="action in actions" :key="action" :value="action">{{ action }}</option>
-        </select>
-      </label>
-      <label class="text-sm font-medium" for="issuedBy">Issued by
-        <input id="issuedBy" v-model="form.issuedBy" required autocomplete="off" class="mt-1 w-full rounded-md border border-stone-300 px-3 py-2" />
-      </label>
-      <label class="text-sm font-medium" for="correlationId">Correlation ID (optional)
-        <input id="correlationId" v-model="form.correlationId" autocomplete="off" class="mt-1 w-full rounded-md border border-stone-300 px-3 py-2" />
-      </label>
-      <label class="text-sm font-medium" for="expiresAt">Expires at (ISO-8601)
-        <input id="expiresAt" v-model="form.expiresAt" placeholder="2026-10-06T18:00:00Z" class="mt-1 w-full rounded-md border border-stone-300 px-3 py-2" />
-      </label>
-      <label class="text-sm font-medium" for="presetId">Preset (optional)
-        <select id="presetId" v-model="form.presetId" class="mt-1 w-full rounded-md border border-stone-300 px-3 py-2">
-          <option value="">Custom assault JSON below</option>
-          <option v-for="preset in presets" :key="preset.id" :value="preset.id">{{ preset.label }}</option>
-        </select>
-      </label>
-      <label class="text-sm font-medium" for="assaultJson">Assault JSON
-        <textarea id="assaultJson" v-model="form.assaultJson" rows="8" class="mono mt-1 w-full rounded-md border border-stone-300 px-3 py-2" placeholder='{"level":1,"exceptionsActive":true}'></textarea>
-      </label>
+          <p class="meta">The same name replaces the stored action and assault.</p>
+          <label v-if="saveToCatalog" class="field" for="save-label">Name
+            <input id="save-label" v-model="saveLabel" />
+          </label>
+        </fieldset>
+      </div>
     </div>
-    <div class="mt-4 flex gap-2">
-      <button type="submit" class="rounded-md bg-stone-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="publishing">
-        {{ publishing ? 'Publishing…' : 'Publish' }}
-      </button>
-      <RouterLink class="rounded-md border border-stone-300 px-4 py-2 text-sm" to="/">Cancel</RouterLink>
-    </div>
+    <button type="submit" class="btn btn-primary" :disabled="publishing">
+      {{ publishing ? 'Publishing…' : 'Apply assault' }}
+    </button>
   </form>
 </template>

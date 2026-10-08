@@ -11,7 +11,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 /**
  * Command relay. Discovers UP instances and posts each command to them.
  *
- * <p>Scheduling removes stored commands past {@code chaos.relay.command-ttl-hours}.
+ * <p>Scheduling refreshes the Chaos Monkey status cache.
  */
 @SpringBootApplication
 @EnableConfigurationProperties(ChaosRelayProperties.class)

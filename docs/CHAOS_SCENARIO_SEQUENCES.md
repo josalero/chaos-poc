@@ -275,7 +275,7 @@ The instance answers with `ChaosCommandResult`:
 {
   "commandId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   "targetApplication": "chaos-poc-demo",
-  "podName": "chaos-poc-demo-1",
+  "podName": "chaos-poc-demo",
   "outcome": "SUCCESS",
   "failedStep": null,
   "httpStatus": null,
@@ -333,7 +333,7 @@ Results are stored as they arrive. The aggregate status is calculated each time 
 sequenceDiagram
     autonumber
     participant Dispatcher as dispatch threads
-    participant Store as InMemoryChaosCommandStore
+    participant Store as JpaChaosCommandStore
     participant Status as ChaosCommandStatusService
     actor Reader as console / UI / script
 
@@ -353,7 +353,7 @@ sequenceDiagram
     else some instances reported SUCCESS, others not yet
         Status-->>Reader: PARTIAL
     end
-    Note over Store: ChaosCommandStoreCleanup removes commands<br/>older than command-ttl-hours (24)
+    Note over Store: results are keyed by Eureka instance id<br/>and kept in the H2 file
 ```
 
 `GET /internal/v1/chaos/commands/{commandId}` has no body. A SOME command that landed on one of two instances looks like this:
@@ -371,7 +371,7 @@ sequenceDiagram
   "instanceIds": ["chaos-poc-demo-1"],
   "instances": [
     {
-      "podName": "chaos-poc-demo-1",
+      "podName": "chaos-poc-demo",
       "outcome": "SUCCESS",
       "reportedAt": "2026-10-06T18:00:01Z",
       "failedStep": null,
@@ -525,4 +525,29 @@ sequenceDiagram
     end
     Script->>Relay: POST disable.json (suite-final)
     Script->>Script: All scenario checks passed (isolated, default configuration restored)
+```
+
+## 9. Reset selected services
+
+The home page publishes one disable per selected name and polls. It does not wait inside the relay, and it never resets a service that was not selected.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Operator
+    participant UI as Dashboard
+    participant Relay as POST /services/reset
+    participant Pods as selected UP instances
+
+    Operator->>UI: select names, including ones hidden by the filter
+    UI->>Relay: applicationNames
+    alt empty list or a name is not allowlisted
+        Relay-->>UI: 400, nothing published
+    else every name is allowlisted
+        Relay->>Pods: DISABLE, one command id per name
+        Relay-->>UI: 202
+        loop every 2s until APPLIED, FAILED, or TIMED_OUT
+            UI->>Relay: GET /internal/v1/chaos/commands/{id}
+        end
+    end
 ```

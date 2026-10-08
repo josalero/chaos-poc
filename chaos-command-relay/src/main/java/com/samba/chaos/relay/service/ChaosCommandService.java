@@ -1,8 +1,12 @@
 package com.samba.chaos.relay.service;
 
+import com.samba.chaos.command.ChaosCommandAction;
+import com.samba.chaos.relay.config.ChaosRelayProperties;
+import com.samba.chaos.relay.model.ChaosCommandPageResponse;
 import com.samba.chaos.relay.model.ChaosCommandRequest;
 import com.samba.chaos.relay.model.ChaosCommandStatusResponse;
 import com.samba.chaos.relay.model.ChaosCommandSubmitResponse;
+import com.samba.chaos.relay.model.CommandAggregateStatus;
 import com.samba.chaos.relay.model.InstanceSelection;
 import com.samba.chaos.relay.model.ValidationErrorResponse;
 import com.samba.chaos.relay.model.ValidationErrorResponse.FieldError;
@@ -16,6 +20,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.cloud.client.ServiceInstance;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 /**
@@ -32,6 +38,7 @@ public class ChaosCommandService {
   private final ChaosCommandDispatcher dispatcher;
   private final ChaosCommandStore commandStore;
   private final ChaosCommandStatusService statusService;
+  private final ChaosRelayProperties properties;
 
   /**
    * Creates the submit service.
@@ -39,20 +46,23 @@ public class ChaosCommandService {
    * @param validator field rules for environment, allowlist, assault, and expiry
    * @param instancesResolver UP instances from Eureka
    * @param dispatcher per-instance HTTP fan-out
-   * @param commandStore in-memory command history
+   * @param commandStore command history
    * @param statusService aggregate and response mapping
+   * @param properties allowlist used by the command list
    */
   public ChaosCommandService(
       ChaosCommandValidator validator,
       TargetInstancesResolver instancesResolver,
       ChaosCommandDispatcher dispatcher,
       ChaosCommandStore commandStore,
-      ChaosCommandStatusService statusService) {
+      ChaosCommandStatusService statusService,
+      ChaosRelayProperties properties) {
     this.validator = validator;
     this.instancesResolver = instancesResolver;
     this.dispatcher = dispatcher;
     this.commandStore = commandStore;
     this.statusService = statusService;
+    this.properties = properties;
   }
 
   /**
@@ -159,6 +169,61 @@ public class ChaosCommandService {
    */
   public Optional<ChaosCommandStatusResponse> getStatus(UUID commandId) {
     return commandStore.findById(commandId).map(statusService::toStatusResponse);
+  }
+
+  /**
+   * Lists stored commands for the allowlist, newest first.
+   *
+   * <p>A status filter is applied after the aggregate is computed, because status is not a column.
+   * {@code size} is clamped to 1..200.
+   *
+   * @param page zero-based page index
+   * @param size requested page size
+   * @param application one allowlisted name, or blank for every allowlisted name
+   * @param status aggregate filter, or null
+   * @param action action filter, or null
+   * @return the page; empty when the application is not allowlisted
+   */
+  public ChaosCommandPageResponse list(
+      int page,
+      int size,
+      String application,
+      CommandAggregateStatus status,
+      ChaosCommandAction action) {
+    int boundedSize = Math.min(200, Math.max(1, size));
+    int boundedPage = Math.max(0, page);
+    List<String> targets = targets(application);
+    if (targets.isEmpty()) {
+      return new ChaosCommandPageResponse(List.of(), boundedPage, boundedSize, 0);
+    }
+    if (status == null) {
+      Page<CommandRecord> stored =
+          commandStore.findPage(targets, action, PageRequest.of(boundedPage, boundedSize));
+      List<ChaosCommandStatusResponse> content =
+          stored.getContent().stream().map(statusService::toStatusResponse).toList();
+      return new ChaosCommandPageResponse(
+          content, boundedPage, boundedSize, stored.getTotalElements());
+    }
+    List<ChaosCommandStatusResponse> matched =
+        commandStore.findMatching(targets, action).stream()
+            .map(statusService::toStatusResponse)
+            .filter(response -> response.status() == status)
+            .toList();
+    int from = Math.min(matched.size(), boundedPage * boundedSize);
+    int to = Math.min(matched.size(), from + boundedSize);
+    return new ChaosCommandPageResponse(
+        List.copyOf(matched.subList(from, to)), boundedPage, boundedSize, matched.size());
+  }
+
+  private List<String> targets(String application) {
+    List<String> allowlist = properties.getAllowedTargetApplications();
+    if (application == null || application.isBlank()) {
+      return List.copyOf(allowlist);
+    }
+    if (!allowlist.contains(application)) {
+      return List.of();
+    }
+    return List.of(application);
   }
 
   /** Outcome of {@link #submit(ChaosCommandRequest)} before HTTP mapping. */

@@ -15,5 +15,5 @@ chaos:
       - chaos-poc-demo
       - chaos-poc-downstream
     status-timeout-seconds: 30
-    command-ttl-hours: 24
+    status-refresh-interval-ms: 20000
     verify-ui-url: http://localhost:18000

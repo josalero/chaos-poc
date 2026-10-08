@@ -1,0 +1,337 @@
+{
+  "info": {
+    "name": "Chaos Command Relay",
+    "description": "Control-plane API for the chaos-poc relay.\n\nSet `baseUrl` to the gateway (`http://localhost:18000/api/relay`) or the relay directly (`http://localhost:18090`). `environment` must be `test`. `expiresAt` is required for ENABLE and CONFIGURE_AND_ENABLE and must be in the future.\n\nPublish requests store `commandId` on the collection. Save catalog stores `catalogId`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:18000/api/relay" },
+    { "key": "applicationName", "value": "chaos-poc-demo" },
+    { "key": "commandId", "value": "" },
+    { "key": "catalogId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Services",
+      "item": [
+        {
+          "name": "List services",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/internal/v1/chaos/services",
+            "description": "One summary per allowlisted name. Does not probe actuators."
+          }
+        },
+        {
+          "name": "Get service",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/internal/v1/chaos/services/{{applicationName}}",
+            "description": "404 when the name is not allowlisted."
+          }
+        },
+        {
+          "name": "Service history",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/internal/v1/chaos/services/{{applicationName}}/history?limit=50",
+            "description": "Newest first. limit default 50, max 200."
+          }
+        },
+        {
+          "name": "Live actuator",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/internal/v1/chaos/services/{{applicationName}}/actuator",
+            "description": "Status and assaults for each UP instance."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Commands",
+      "item": [
+        {
+          "name": "List commands",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/internal/v1/chaos/commands?page=0&size=50",
+            "description": "Optional query: application, status (APPLIED, FAILED, TIMED_OUT, PENDING, PARTIAL, PUBLISHED), action (CONFIGURE_AND_ENABLE, CONFIGURE, ENABLE, DISABLE)."
+          }
+        },
+        {
+          "name": "Publish command",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.commandId) pm.collectionVariables.set('commandId', body.commandId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"environment\": \"test\",\n  \"targetApplication\": \"{{applicationName}}\",\n  \"action\": \"CONFIGURE_AND_ENABLE\",\n  \"issuedBy\": \"postman\",\n  \"expiresAt\": \"2026-10-08T20:00:00Z\",\n  \"assault\": {\n    \"level\": 1,\n    \"deterministic\": true,\n    \"latencyActive\": true,\n    \"latencyRangeStart\": 200,\n    \"latencyRangeEnd\": 800,\n    \"exceptionsActive\": false\n  }\n}\n"
+            },
+            "url": "{{baseUrl}}/internal/v1/chaos/commands",
+            "description": "202 PUBLISHED, then poll Get command. 400 when invalid. 503 when no UP instances. Omit instanceSelection to hit every UP instance. SOME requires instanceIds."
+          }
+        },
+        {
+          "name": "Publish to some instances",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.commandId) pm.collectionVariables.set('commandId', body.commandId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"environment\": \"test\",\n  \"targetApplication\": \"{{applicationName}}\",\n  \"action\": \"DISABLE\",\n  \"issuedBy\": \"postman\",\n  \"instanceSelection\": \"SOME\",\n  \"instanceIds\": [\"replace-with-eureka-instance-id\"]\n}\n"
+            },
+            "url": "{{baseUrl}}/internal/v1/chaos/commands",
+            "description": "instanceIds are Eureka instance ids from Get service upInstanceIds."
+          }
+        },
+        {
+          "name": "Get command",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/internal/v1/chaos/commands/{{commandId}}",
+            "description": "Aggregate is computed on this read. Terminal values are APPLIED, FAILED, and TIMED_OUT."
+          }
+        },
+        {
+          "name": "Publish for one service path",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.commandId) pm.collectionVariables.set('commandId', body.commandId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"environment\": \"test\",\n  \"targetApplication\": \"{{applicationName}}\",\n  \"action\": \"DISABLE\",\n  \"issuedBy\": \"postman\"\n}\n"
+            },
+            "url": "{{baseUrl}}/internal/v1/chaos/services/{{applicationName}}/commands",
+            "description": "targetApplication must equal the path. Same statuses as Publish command."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Catalog",
+      "item": [
+        {
+          "name": "List saved assaults",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/internal/v1/chaos/catalog",
+            "description": "Every allowlisted catalog row, ordered by service then label. Optional ?application=."
+          }
+        },
+        {
+          "name": "List service catalog",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/internal/v1/chaos/services/{{applicationName}}/catalog",
+            "description": "404 when the name is not allowlisted."
+          }
+        },
+        {
+          "name": "Save assault",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.catalogId) pm.collectionVariables.set('catalogId', body.catalogId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Latency template\",\n  \"action\": \"CONFIGURE_AND_ENABLE\",\n  \"assault\": {\n    \"level\": 1,\n    \"deterministic\": true,\n    \"latencyActive\": true,\n    \"latencyRangeStart\": 200,\n    \"latencyRangeEnd\": 800,\n    \"exceptionsActive\": false\n  }\n}\n"
+            },
+            "url": "{{baseUrl}}/internal/v1/chaos/services/{{applicationName}}/catalog",
+            "description": "The same label replaces the stored action and assault. Omit assault for DISABLE. This does not publish the command."
+          }
+        },
+        {
+          "name": "Delete saved assault",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/internal/v1/chaos/services/{{applicationName}}/catalog/{{catalogId}}",
+            "description": "204 when deleted. 404 when the service or id is unknown."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Maintenance",
+      "item": [
+        {
+          "name": "Enable",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.commandId) pm.collectionVariables.set('commandId', body.commandId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"issuedBy\": \"postman\",\n  \"expiresAt\": \"2026-10-08T20:00:00Z\"\n}\n"
+            },
+            "url": "{{baseUrl}}/internal/v1/chaos/services/{{applicationName}}/enable",
+            "description": "Re-enables the last configure assault. expiresAt is required. 202, does not wait."
+          }
+        },
+        {
+          "name": "Disable",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.commandId) pm.collectionVariables.set('commandId', body.commandId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"issuedBy\": \"postman\"\n}\n"
+            },
+            "url": "{{baseUrl}}/internal/v1/chaos/services/{{applicationName}}/disable",
+            "description": "Publishes DISABLE and returns 202 without waiting."
+          }
+        },
+        {
+          "name": "Reset one service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.commandId) pm.collectionVariables.set('commandId', body.commandId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"issuedBy\": \"postman\"\n}\n"
+            },
+            "url": "{{baseUrl}}/internal/v1/chaos/services/{{applicationName}}/reset",
+            "description": "Waits until the disable is terminal. 200 when APPLIED, 409 when FAILED or TIMED_OUT."
+          }
+        },
+        {
+          "name": "Reset selected",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"issuedBy\": \"postman\",\n  \"applicationNames\": [\"chaos-poc-demo\", \"chaos-poc-downstream\"]\n}\n"
+            },
+            "url": "{{baseUrl}}/internal/v1/chaos/services/reset",
+            "description": "202 with one command id per name. Does not wait. 400 when the list is empty or a name is not allowlisted."
+          }
+        },
+        {
+          "name": "Clear demo data",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": "{{baseUrl}}/internal/v1/chaos/services/{{applicationName}}/clear-demo-data",
+            "description": "Resets in-memory demo orders and inventory. Does not change the Chaos Monkey assault."
+          }
+        }
+      ]
+    }
+  ]
+}

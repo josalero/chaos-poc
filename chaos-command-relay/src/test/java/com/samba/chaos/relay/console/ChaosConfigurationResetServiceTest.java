@@ -144,24 +144,51 @@ class ChaosConfigurationResetServiceTest {
   }
 
   @Test
-  void resetAllConfigurations_resetsEveryAllowedTargetWithoutClearingDemoData() {
+  void resetSelected_publishesOneDisablePerNameWithoutWaiting() {
     ChaosRelayProperties properties = new ChaosRelayProperties();
-    properties.setStatusTimeoutSeconds(5);
     properties.setAllowedTargetApplications(List.of("chaos-poc-demo", "chaos-poc-downstream"));
     resetService =
         new ChaosConfigurationResetService(
             maintenanceService, commandStore, commandStatusService, demoAdminClient, properties);
+    UUID demoId = UUID.randomUUID();
+    when(maintenanceService.disable(eq("chaos-poc-demo"), any()))
+        .thenReturn(
+            ChaosServiceMaintenanceService.MaintenanceResult.accepted(
+                new ChaosCommandSubmitResponse(
+                    demoId,
+                    CommandAggregateStatus.PUBLISHED,
+                    Instant.now(),
+                    "chaos-poc-demo",
+                    1,
+                    "/internal/v1/chaos/commands/" + demoId,
+                    null)));
+    when(maintenanceService.disable(eq("chaos-poc-downstream"), any()))
+        .thenReturn(
+            ChaosServiceMaintenanceService.MaintenanceResult.rejected(
+                List.of(new FieldError("targetApplication", "no UP instances"))));
 
-    stubSuccessfulReset("chaos-poc-demo");
-    stubSuccessfulReset("chaos-poc-downstream");
+    ChaosConfigurationResetService.ResetSelectionResult result =
+        resetService.resetSelected(
+            "chaos-console", List.of("chaos-poc-demo", "chaos-poc-demo", "chaos-poc-downstream"));
 
-    ChaosConfigurationResetService.ResetAllConfigurationResult result =
-        resetService.resetAllConfigurations(
-            new ChaosMaintenanceRequest("chaos-console", "reset-all-test", null));
-
-    assertThat(result.allSucceeded()).isTrue();
-    assertThat(result.outcomes()).hasSize(2);
+    assertThat(result)
+        .isInstanceOf(ChaosConfigurationResetService.ResetSelectionResult.Accepted.class);
+    ChaosConfigurationResetService.ResetSelectionResult.Accepted accepted =
+        (ChaosConfigurationResetService.ResetSelectionResult.Accepted) result;
+    assertThat(accepted.services()).hasSize(2);
+    assertThat(accepted.services().getFirst().commandId()).isEqualTo(demoId);
+    assertThat(accepted.services().get(1).errors()).isNotEmpty();
+    verify(commandStatusService, never()).aggregateStatus(any());
     verify(demoAdminClient, never()).resetDemoData(any());
+  }
+
+  @Test
+  void resetSelected_rejectsEmptyAndUnknownNamesWithoutPublishing() {
+    assertThat(resetService.resetSelected("op", List.of()))
+        .isInstanceOf(ChaosConfigurationResetService.ResetSelectionResult.Rejected.class);
+    assertThat(resetService.resetSelected("op", List.of("unknown")))
+        .isInstanceOf(ChaosConfigurationResetService.ResetSelectionResult.Rejected.class);
+    verify(maintenanceService, never()).disable(any(), any());
   }
 
   @Test
@@ -298,58 +325,5 @@ class ChaosConfigurationResetServiceTest {
                     "orders", new ChaosMaintenanceRequest("op", "corr", null)))
         .isInstanceOf(IllegalStateException.class);
     assertThat(Thread.interrupted()).isTrue();
-  }
-
-  @Test
-  void failedServiceErrorsIncludeRejectedAndUnappliedCommands() {
-    UUID commandId = UUID.randomUUID();
-    ChaosConfigurationResetService.ResetAllConfigurationResult result =
-        new ChaosConfigurationResetService.ResetAllConfigurationResult(
-            List.of(
-                new ChaosConfigurationResetService.ResetAllConfigurationResult.ServiceResetOutcome(
-                    "orders",
-                    ChaosConfigurationResetService.ResetConfigurationResult.rejected(
-                        List.of(new FieldError("target", "no")))),
-                new ChaosConfigurationResetService.ResetAllConfigurationResult.ServiceResetOutcome(
-                    "billing",
-                    ChaosConfigurationResetService.ResetConfigurationResult.commandNotApplied(
-                        commandId, CommandAggregateStatus.TIMED_OUT)),
-                new ChaosConfigurationResetService.ResetAllConfigurationResult.ServiceResetOutcome(
-                    "gateway",
-                    ChaosConfigurationResetService.ResetConfigurationResult.success(commandId))));
-
-    assertThat(result.successCount()).isEqualTo(1);
-    assertThat(result.allSucceeded()).isFalse();
-    assertThat(result.failedServiceErrors()).hasSize(2);
-  }
-
-  private void stubSuccessfulReset(String applicationName) {
-    UUID commandId = UUID.randomUUID();
-    CommandRecord record =
-        new CommandRecord(
-            commandId,
-            ChaosCommandAction.DISABLE,
-            applicationName,
-            1,
-            Instant.now(),
-            "console-reset",
-            "chaos-console",
-            null,
-            null,
-            List.of());
-
-    when(maintenanceService.disable(eq(applicationName), any()))
-        .thenReturn(
-            ChaosServiceMaintenanceService.MaintenanceResult.accepted(
-                new ChaosCommandSubmitResponse(
-                    commandId,
-                    CommandAggregateStatus.PUBLISHED,
-                    Instant.now(),
-                    applicationName,
-                    1,
-                    "/internal/v1/chaos/commands/" + commandId,
-                    "console-reset")));
-    when(commandStore.findById(commandId)).thenReturn(Optional.of(record));
-    when(commandStatusService.aggregateStatus(record)).thenReturn(CommandAggregateStatus.APPLIED);
   }
 }

@@ -5,6 +5,7 @@ import com.samba.chaos.command.ChaosCommandAction;
 import com.samba.chaos.relay.config.ChaosRelayProperties;
 import com.samba.chaos.relay.console.ChaosMonkeyActuatorProbe;
 import com.samba.chaos.relay.console.ChaosMonkeyRuntimeSnapshot;
+import com.samba.chaos.relay.console.ChaosMonkeyStatusCache;
 import com.samba.chaos.relay.model.ChaosCommandStatusResponse;
 import com.samba.chaos.relay.model.ChaosServiceStatusResponse;
 import com.samba.chaos.relay.model.ChaosServiceStatusSummary;
@@ -12,6 +13,7 @@ import com.samba.chaos.relay.model.CommandAggregateStatus;
 import com.samba.chaos.relay.model.ServiceConfigState;
 import com.samba.chaos.relay.store.ChaosCommandStore;
 import com.samba.chaos.relay.store.CommandRecord;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.cloud.client.ServiceInstance;
@@ -20,17 +22,20 @@ import org.springframework.stereotype.Service;
 /**
  * Allowlisted service reads for the operator console.
  *
- * <p>Status and history come from the in-memory store. The actuator snapshot is a live read of each
- * UP instance and is not stored.
+ * <p>The list reads the status cache and the stored history. It does not call the actuator. Detail
+ * and actuator reads still probe each UP instance.
  */
 @Service
 public class ChaosServiceStatusService {
+
+  private static final int MAX_HISTORY_LIMIT = 200;
 
   private final ChaosCommandStore commandStore;
   private final ChaosRelayProperties properties;
   private final ChaosCommandStatusService statusService;
   private final TargetInstancesResolver instancesResolver;
   private final ChaosMonkeyActuatorProbe actuatorProbe;
+  private final ChaosMonkeyStatusCache statusCache;
 
   /**
    * Creates the status service.
@@ -40,18 +45,21 @@ public class ChaosServiceStatusService {
    * @param commandStore command history
    * @param statusService aggregate for the latest command
    * @param actuatorProbe live Chaos Monkey actuator read
+   * @param statusCache cached on/off state for the list
    */
   public ChaosServiceStatusService(
       ChaosCommandStore commandStore,
       ChaosRelayProperties properties,
       ChaosCommandStatusService statusService,
       TargetInstancesResolver instancesResolver,
-      ChaosMonkeyActuatorProbe actuatorProbe) {
+      ChaosMonkeyActuatorProbe actuatorProbe,
+      ChaosMonkeyStatusCache statusCache) {
     this.commandStore = commandStore;
     this.properties = properties;
     this.statusService = statusService;
     this.instancesResolver = instancesResolver;
     this.actuatorProbe = actuatorProbe;
+    this.statusCache = statusCache;
   }
 
   /**
@@ -60,7 +68,7 @@ public class ChaosServiceStatusService {
    * @return summaries; an app with no commands reports {@code NOT_CONFIGURED}
    */
   public List<ChaosServiceStatusSummary> listServices() {
-    return properties.getAllowedTargetApplications().stream().map(this::toSummary).toList();
+    return properties.getAllowedTargetApplications().stream().map(this::toListSummary).toList();
   }
 
   /**
@@ -90,27 +98,47 @@ public class ChaosServiceStatusService {
    * @param applicationName Eureka application name
    * @return empty when the name is not allowlisted; an empty list when it has no commands
    */
-  public Optional<List<ChaosCommandStatusResponse>> getHistory(String applicationName) {
+  public Optional<List<ChaosCommandStatusResponse>> getHistory(String applicationName, int limit) {
     if (!properties.getAllowedTargetApplications().contains(applicationName)) {
       return Optional.empty();
     }
+    int bounded = Math.clamp(limit, 1, MAX_HISTORY_LIMIT);
     return Optional.of(
-        commandStore.findByApplication(applicationName).stream()
+        commandStore.findByApplication(applicationName, bounded).stream()
             .map(statusService::toStatusResponse)
             .toList());
   }
 
-  private ChaosServiceStatusSummary toSummary(String applicationName) {
-    ChaosServiceStatusResponse response = toResponse(applicationName);
+  private ChaosServiceStatusSummary toListSummary(String applicationName) {
+    Optional<CommandRecord> latest = commandStore.findLatestByApplication(applicationName);
+    int liveInstances = instancesResolver.resolveUp(applicationName).size();
+    ChaosMonkeyStatusCache.Entry cached = statusCache.get(applicationName).orElse(null);
+    Boolean cmEnabled = cached == null ? null : cached.enabled();
+    Instant checkedAt = cached == null ? null : cached.checkedAt();
+    if (latest.isEmpty()) {
+      return new ChaosServiceStatusSummary(
+          applicationName,
+          true,
+          ServiceConfigState.DEFAULT,
+          cmEnabled,
+          null,
+          null,
+          liveInstances,
+          liveInstances,
+          checkedAt);
+    }
+    CommandRecord record = latest.get();
+    CommandAggregateStatus commandStatus = statusService.aggregateStatus(record);
     return new ChaosServiceStatusSummary(
-        response.applicationName(),
-        response.registryEnabled(),
-        response.configState(),
-        response.cmEnabled(),
-        response.lastCommandId(),
-        response.lastCommandStatus(),
-        response.eurekaUpCount(),
-        response.expectedInstances());
+        applicationName,
+        true,
+        toConfigState(record, commandStatus),
+        cmEnabled,
+        record.commandId(),
+        commandStatus,
+        liveInstances,
+        record.expectedInstances(),
+        checkedAt);
   }
 
   private ChaosServiceStatusResponse toResponse(String applicationName) {

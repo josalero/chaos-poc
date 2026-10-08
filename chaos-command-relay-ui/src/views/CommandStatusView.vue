@@ -2,8 +2,10 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { getCommand, verifyUiUrl } from '../api/relayClient.js';
+import PageHeader from '../components/PageHeader.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import { errorMessages } from '../lib/errors.js';
+import { serviceTitle } from '../lib/labels.js';
 
 const route = useRoute();
 const status = ref(null);
@@ -19,7 +21,7 @@ const headline = computed(() => {
     return 'Patch applied to selected replicas';
   }
   if (status.value.status === 'APPLIED') return 'Patch applied';
-  if (status.value.status === 'FAILED' || status.value.status === 'TIMED_OUT') return 'Patch failed';
+  if (status.value.status === 'FAILED' || status.value.status === 'TIMED_OUT') return 'Patch did not apply';
   return 'Waiting for replicas…';
 });
 
@@ -54,58 +56,78 @@ onUnmounted(stopPolling);
 </script>
 
 <template>
-  <RouterLink class="text-sm text-stone-600 underline" to="/">Back to scenarios</RouterLink>
-  <p v-if="loadError" class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900" role="alert">{{ loadError }}</p>
+  <PageHeader
+    :title="headline"
+    :crumbs="[
+      { label: 'Commands', to: '/commands' },
+      { label: String(route.params.commandId).slice(0, 8) },
+    ]"
+  >
+    <template v-if="status" #actions>
+      <StatusBadge :status="status.status" />
+    </template>
+  </PageHeader>
+  <p v-if="loadError" class="alert alert-error" role="alert">{{ loadError }}</p>
+  <p v-else-if="status?.status === 'APPLIED' && status?.instanceSelection === 'SOME'" class="meta">
+    Only the selected replicas were changed. The others keep their current assault.
+  </p>
+  <p v-else-if="status?.status === 'APPLIED'" class="meta">
+    All expected replicas reported success. Open Verify UI and place orders.
+  </p>
+  <p v-else-if="status?.status === 'FAILED' || status?.status === 'TIMED_OUT'" class="meta">
+    Check the replica results, then open this service history and apply again.
+  </p>
+  <p v-else-if="waiting" class="meta">Refreshing every 2 seconds until the command is applied or fails.</p>
 
-  <section class="mt-4 flex flex-wrap items-start justify-between gap-4 rounded-xl border border-stone-200 bg-white p-5">
-    <div>
-      <p class="text-xs font-semibold tracking-widest text-orange-800">PATCH STATUS</p>
-      <h1 class="text-3xl font-semibold">{{ headline }}</h1>
-      <p v-if="status?.status === 'APPLIED' && status?.instanceSelection === 'SOME'" class="mt-2 text-stone-600">Only the selected replicas were changed. The others keep their current assault.</p>
-      <p v-else-if="status?.status === 'APPLIED'" class="mt-2 text-stone-600">All expected replicas reported success. Open Verify UI and place orders.</p>
-      <p v-else-if="status?.status === 'FAILED' || status?.status === 'TIMED_OUT'" class="mt-2 text-stone-600">Something went wrong. Check pod results or try another scenario.</p>
-      <p v-else-if="waiting" class="mt-2 text-stone-600">Refreshing every 2 seconds until Applied or Failed.</p>
-    </div>
-    <StatusBadge v-if="status" :status="status.status" />
-  </section>
-
-  <section v-if="status" class="mt-4 rounded-xl border border-stone-200 bg-white p-5">
-    <dl class="grid gap-4 sm:grid-cols-3">
-      <div><dt class="text-sm text-stone-500">Target</dt><dd>{{ status.targetApplication }}</dd></div>
-      <div><dt class="text-sm text-stone-500">Replicas</dt><dd>{{ status.successCount }} / {{ status.expectedInstances }}</dd></div>
-      <div><dt class="text-sm text-stone-500">Action</dt><dd class="mono">{{ status.action }}</dd></div>
+  <section v-if="status" class="panel panel-pad">
+    <h2 class="sr-only">Command</h2>
+    <dl class="facts cols-4">
       <div>
-        <dt class="text-sm text-stone-500">Scope</dt>
+        <dt>Target</dt>
+        <dd>
+          <RouterLink class="row-link" :to="{ name: 'service', params: { applicationName: status.targetApplication } }">
+            {{ serviceTitle(status.targetApplication) }}
+          </RouterLink>
+        </dd>
+      </div>
+      <div>
+        <dt>Replicas</dt>
+        <dd class="nums">{{ status.successCount }} / {{ status.expectedInstances }}</dd>
+      </div>
+      <div>
+        <dt>Action</dt>
+        <dd class="mono">{{ status.action }}</dd>
+      </div>
+      <div>
+        <dt>Scope</dt>
         <dd class="mono">{{ status.instanceSelection || 'ALL' }}<span v-if="status.instanceIds?.length"> · {{ status.instanceIds.join(', ') }}</span></dd>
       </div>
     </dl>
   </section>
 
-  <section v-if="status?.instances?.length" class="mt-4 rounded-xl border border-stone-200 bg-white p-5">
-    <h2 class="text-lg font-semibold">Per-pod results</h2>
-    <div class="mt-3 grid gap-3 sm:grid-cols-2">
+  <section v-if="status?.instances?.length" class="stack">
+    <h2>Replica results</h2>
+    <div class="split">
       <article
         v-for="instance in status.instances"
         :key="instance.podName"
-        class="rounded-lg border p-3"
-        :class="instance.outcome === 'SUCCESS' ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50'"
+        class="panel panel-pad"
       >
-        <strong class="mono block">{{ instance.podName }}</strong>
-        <span>{{ instance.outcome }}</span>
-        <small class="block text-stone-600">
+        <strong class="mono">{{ instance.podName }}</strong>
+        <span :class="instance.outcome === 'SUCCESS' ? '' : 'bad'">{{ instance.outcome }}</span>
+        <small class="sub">
           {{ instance.httpStatus != null ? `HTTP ${instance.httpStatus}` : instance.failedStep || '—' }}
         </small>
       </article>
     </div>
   </section>
 
-  <div v-if="status?.status === 'APPLIED'" class="mt-4 flex flex-wrap gap-2">
-    <a class="rounded-md bg-stone-900 px-4 py-2 text-sm font-semibold text-white" :href="verifyUiUrl" target="_blank" rel="noopener noreferrer">Open Verify UI</a>
-    <RouterLink class="rounded-md border border-stone-300 px-4 py-2 text-sm" :to="{ name: 'service', params: { applicationName: status.targetApplication }, query: { tab: 'commands' } }">History</RouterLink>
-    <RouterLink class="rounded-md border border-stone-300 px-4 py-2 text-sm" to="/">More scenarios</RouterLink>
+  <div v-if="status?.status === 'APPLIED'" class="button-row">
+    <a class="btn btn-primary" :href="verifyUiUrl" target="_blank" rel="noopener noreferrer">Open Verify UI</a>
+    <RouterLink class="btn" :to="{ name: 'service', params: { applicationName: status.targetApplication }, query: { tab: 'commands' } }">Service history</RouterLink>
   </div>
-  <div v-else-if="status?.status === 'FAILED' || status?.status === 'TIMED_OUT'" class="mt-4 flex flex-wrap gap-2">
-    <RouterLink class="rounded-md bg-stone-900 px-4 py-2 text-sm font-semibold text-white" to="/">Try another scenario</RouterLink>
-    <RouterLink class="rounded-md border border-stone-300 px-4 py-2 text-sm" :to="{ name: 'service', params: { applicationName: status.targetApplication }, query: { tab: 'commands' } }">History</RouterLink>
+  <div v-else-if="status?.status === 'FAILED' || status?.status === 'TIMED_OUT'" class="button-row">
+    <RouterLink class="btn btn-primary" :to="{ name: 'service', params: { applicationName: status.targetApplication }, query: { tab: 'apply' } }">Apply again</RouterLink>
+    <RouterLink class="btn" :to="{ name: 'service', params: { applicationName: status.targetApplication }, query: { tab: 'commands' } }">Service history</RouterLink>
   </div>
 </template>

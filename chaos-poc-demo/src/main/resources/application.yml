@@ -17,4 +17,4 @@ samba:
   chaos:
     command:
       enabled: true
-      pod-name: ${HOSTNAME:chaos-poc-demo}
+      pod-name: ${spring.application.name}

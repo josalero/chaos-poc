@@ -28,17 +28,31 @@ export function commandRequestJson(entry) {
 }
 
 /** Quick-scenario payload. A two-hour lease is set unless the preset disables Chaos Monkey. */
-export function commandFromPreset(preset, now = new Date()) {
+export function commandFromPreset(preset, now = new Date(), targetApplication) {
   const disable = preset.action === 'DISABLE';
   return {
     environment: preset.environment || 'test',
-    targetApplication: preset.targetApplication,
+    targetApplication: targetApplication || preset.targetApplication,
     action: preset.action,
     assault: disable ? null : (preset.assault ?? null),
     expiresAt: disable ? null : leaseExpiresAt(now),
     issuedBy: 'chaos-console',
     correlationId: `quick-${preset.id}`,
   };
+}
+
+/** Saved catalog entry. A two-hour lease is set unless the entry disables Chaos Monkey. */
+export function commandFromCatalog(entry, now = new Date()) {
+  return commandFromPreset(
+    {
+      id: entry.catalogId,
+      action: entry.action,
+      assault: entry.assault,
+      environment: 'test',
+    },
+    now,
+    entry.targetApplication,
+  );
 }
 
 /** Advanced publish form. Custom assault JSON wins over a selected preset. */

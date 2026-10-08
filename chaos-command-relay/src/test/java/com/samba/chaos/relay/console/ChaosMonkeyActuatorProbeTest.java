@@ -8,9 +8,11 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import com.samba.chaos.relay.config.JacksonConfiguration;
 import com.samba.chaos.relay.service.TargetInstancesResolver;
+import java.net.URI;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.cloud.client.DefaultServiceInstance;
+import org.springframework.cloud.client.ServiceInstance;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -23,7 +25,10 @@ class ChaosMonkeyActuatorProbeTest {
     when(resolver.resolveUp("chaos-poc-demo")).thenReturn(List.of());
     ChaosMonkeyActuatorProbe probe =
         new ChaosMonkeyActuatorProbe(
-            resolver, RestClient.create(), new JacksonConfiguration().objectMapper());
+            resolver,
+            RestClient.create(),
+            new JacksonConfiguration().objectMapper(),
+            Runnable::run);
 
     ChaosMonkeyRuntimeSnapshot snapshot = probe.probe("chaos-poc-demo");
 
@@ -48,7 +53,7 @@ class ChaosMonkeyActuatorProbeTest {
             withSuccess("{\"latencyActive\":true,\"level\":1}", MediaType.APPLICATION_JSON));
     ChaosMonkeyActuatorProbe probe =
         new ChaosMonkeyActuatorProbe(
-            resolver, builder.build(), new JacksonConfiguration().objectMapper());
+            resolver, builder.build(), new JacksonConfiguration().objectMapper(), Runnable::run);
 
     ChaosMonkeyRuntimeSnapshot snapshot = probe.probe("chaos-poc-demo");
 
@@ -56,6 +61,13 @@ class ChaosMonkeyActuatorProbeTest {
     assertThat(snapshot.enabled()).isTrue();
     assertThat(snapshot.statusJson()).contains("enabled");
     assertThat(snapshot.assaultsJson()).contains("latencyActive");
+    assertThat(snapshot.instances()).hasSize(1);
+    ChaosInstanceActuatorSnapshot instance = snapshot.instances().getFirst();
+    assertThat(instance.instanceId()).isEqualTo("pod-a");
+    assertThat(instance.enabled()).isTrue();
+    assertThat(instance.statusJson()).contains("enabled");
+    assertThat(instance.assaultsJson()).contains("latencyActive");
+    assertThat(instance.error()).isNull();
     server.verify();
   }
 
@@ -74,12 +86,17 @@ class ChaosMonkeyActuatorProbeTest {
             });
     ChaosMonkeyActuatorProbe probe =
         new ChaosMonkeyActuatorProbe(
-            resolver, builder.build(), new JacksonConfiguration().objectMapper());
+            resolver, builder.build(), new JacksonConfiguration().objectMapper(), Runnable::run);
 
     ChaosMonkeyRuntimeSnapshot snapshot = probe.probe("orders");
 
     assertThat(snapshot.reachable()).isFalse();
     assertThat(snapshot.errorMessage()).contains("down");
+    assertThat(snapshot.instances())
+        .singleElement()
+        .extracting(ChaosInstanceActuatorSnapshot::error)
+        .asString()
+        .contains("down");
   }
 
   @Test
@@ -97,12 +114,96 @@ class ChaosMonkeyActuatorProbeTest {
         .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
     ChaosMonkeyActuatorProbe probe =
         new ChaosMonkeyActuatorProbe(
-            resolver, builder.build(), new JacksonConfiguration().objectMapper());
+            resolver, builder.build(), new JacksonConfiguration().objectMapper(), Runnable::run);
 
     ChaosMonkeyRuntimeSnapshot snapshot = probe.probe("orders");
 
     assertThat(snapshot.enabled()).isFalse();
     assertThat(snapshot.statusJson()).isNull();
     assertThat(snapshot.assaultsJson()).isNull();
+  }
+
+  @Test
+  void probe_usesHostWhenInstanceIdIsBlankAndKeepsFailedInstance() {
+    TargetInstancesResolver resolver = mock(TargetInstancesResolver.class);
+    ServiceInstance blank = mock(ServiceInstance.class);
+    when(blank.getInstanceId()).thenReturn("  ");
+    when(blank.getHost()).thenReturn("blank-host");
+    when(blank.getUri()).thenReturn(URI.create("http://blank-host:8080"));
+    when(resolver.resolveUp("orders"))
+        .thenReturn(
+            List.of(blank, new DefaultServiceInstance("pod-b", "orders", "down", 8081, false)));
+    RestClient.Builder builder = RestClient.builder();
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    server
+        .expect(requestTo("http://blank-host:8080/actuator/chaosmonkey/status"))
+        .andRespond(withSuccess("{\"enabled\":false}", MediaType.APPLICATION_JSON));
+    server
+        .expect(requestTo("http://blank-host:8080/actuator/chaosmonkey/assaults"))
+        .andRespond(withSuccess("{\"level\":1}", MediaType.APPLICATION_JSON));
+    server
+        .expect(requestTo("http://down:8081/actuator/chaosmonkey/status"))
+        .andRespond(
+            request -> {
+              throw new org.springframework.web.client.ResourceAccessException("down");
+            });
+    ChaosMonkeyActuatorProbe probe =
+        new ChaosMonkeyActuatorProbe(
+            resolver, builder.build(), new JacksonConfiguration().objectMapper(), Runnable::run);
+
+    ChaosMonkeyRuntimeSnapshot snapshot = probe.probe("orders");
+
+    assertThat(snapshot.enabled()).isFalse();
+    assertThat(snapshot.instances())
+        .extracting(ChaosInstanceActuatorSnapshot::instanceId)
+        .containsExactly("blank-host", "pod-b");
+    assertThat(snapshot.instances().get(1).enabled()).isNull();
+    assertThat(snapshot.instances().get(1).statusJson()).isNull();
+    assertThat(snapshot.instances().get(1).assaultsJson()).isNull();
+    server.verify();
+  }
+
+  @Test
+  void readEnabled_orsAnswersAndSkipsFailures() {
+    TargetInstancesResolver resolver = mock(TargetInstancesResolver.class);
+    when(resolver.resolveUp("orders")).thenReturn(List.of());
+    ChaosMonkeyActuatorProbe empty =
+        new ChaosMonkeyActuatorProbe(
+            resolver,
+            RestClient.create(),
+            new JacksonConfiguration().objectMapper(),
+            Runnable::run);
+    assertThat(empty.readEnabled("orders").upInstances()).isZero();
+
+    when(resolver.resolveUp("orders"))
+        .thenReturn(
+            List.of(
+                new DefaultServiceInstance("pod-a", "orders", "off", 8080, false),
+                new DefaultServiceInstance("pod-b", "orders", "down", 8081, false),
+                new DefaultServiceInstance("pod-c", "orders", "on", 8082, false)));
+    RestClient.Builder builder = RestClient.builder();
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    server
+        .expect(requestTo("http://off:8080/actuator/chaosmonkey/status"))
+        .andRespond(withSuccess("{\"enabled\":false}", MediaType.APPLICATION_JSON));
+    server
+        .expect(requestTo("http://down:8081/actuator/chaosmonkey/status"))
+        .andRespond(
+            request -> {
+              throw new org.springframework.web.client.ResourceAccessException("down");
+            });
+    server
+        .expect(requestTo("http://on:8082/actuator/chaosmonkey/status"))
+        .andRespond(withSuccess("{\"enabled\":true}", MediaType.APPLICATION_JSON));
+    ChaosMonkeyActuatorProbe probe =
+        new ChaosMonkeyActuatorProbe(
+            resolver, builder.build(), new JacksonConfiguration().objectMapper(), Runnable::run);
+
+    ChaosMonkeyActuatorProbe.EnabledRead read = probe.readEnabled("orders");
+
+    assertThat(read.enabled()).isTrue();
+    assertThat(read.reachableInstances()).isEqualTo(2);
+    assertThat(read.upInstances()).isEqualTo(3);
+    server.verify();
   }
 }

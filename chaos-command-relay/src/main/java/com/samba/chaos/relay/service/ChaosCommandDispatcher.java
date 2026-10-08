@@ -4,6 +4,8 @@ import com.samba.chaos.command.ChaosCommandMessage;
 import com.samba.chaos.command.ChaosCommandResult;
 import com.samba.chaos.command.InstanceOutcome;
 import com.samba.chaos.relay.client.ChaosCommandClient;
+import com.samba.chaos.relay.console.ChaosMonkeyStatusCache;
+import com.samba.chaos.relay.model.CommandAggregateStatus;
 import com.samba.chaos.relay.store.ChaosCommandStore;
 import feign.FeignException;
 import feign.RetryableException;
@@ -31,6 +33,8 @@ public class ChaosCommandDispatcher {
   private final ChaosCommandClient commandClient;
   private final ChaosCommandStore commandStore;
   private final TaskExecutor chaosDispatchExecutor;
+  private final ChaosCommandStatusService statusService;
+  private final ChaosMonkeyStatusCache statusCache;
 
   /**
    * Creates the dispatcher.
@@ -38,14 +42,20 @@ public class ChaosCommandDispatcher {
    * @param commandClient Feign client that posts to a caller-supplied instance URI
    * @param commandStore where each instance result is appended
    * @param chaosDispatchExecutor virtual-thread executor, or the caller thread in tests
+   * @param statusService aggregate used to decide when a command is finished
+   * @param statusCache refreshed when a command reaches a terminal aggregate
    */
   public ChaosCommandDispatcher(
       ChaosCommandClient commandClient,
       ChaosCommandStore commandStore,
-      @Qualifier("chaosDispatchExecutor") TaskExecutor chaosDispatchExecutor) {
+      @Qualifier("chaosDispatchExecutor") TaskExecutor chaosDispatchExecutor,
+      ChaosCommandStatusService statusService,
+      ChaosMonkeyStatusCache statusCache) {
     this.commandClient = commandClient;
     this.commandStore = commandStore;
     this.chaosDispatchExecutor = chaosDispatchExecutor;
+    this.statusService = statusService;
+    this.statusCache = statusCache;
   }
 
   /**
@@ -56,15 +66,29 @@ public class ChaosCommandDispatcher {
    */
   public void dispatch(ChaosCommandMessage message, List<ServiceInstance> instances) {
     instances.forEach(
-        instance ->
-            chaosDispatchExecutor.execute(() -> commandStore.addResult(send(message, instance))));
+        instance -> chaosDispatchExecutor.execute(() -> record(send(message, instance))));
+  }
+
+  private void record(ChaosCommandResult result) {
+    commandStore.addResult(result);
+    commandStore
+        .findById(result.commandId())
+        .map(statusService::aggregateStatus)
+        .filter(ChaosCommandDispatcher::isTerminal)
+        .ifPresent(status -> statusCache.refresh(result.targetApplication()));
+  }
+
+  private static boolean isTerminal(CommandAggregateStatus status) {
+    return status == CommandAggregateStatus.APPLIED
+        || status == CommandAggregateStatus.FAILED
+        || status == CommandAggregateStatus.TIMED_OUT;
   }
 
   private ChaosCommandResult send(ChaosCommandMessage message, ServiceInstance instance) {
     try {
       ChaosCommandResult body = commandClient.apply(instance.getUri(), message);
       if (body != null) {
-        return body;
+        return keyedToInstance(body, instance);
       }
       return outcome(message, instance, InstanceOutcome.ACTUATOR_ERROR, null);
     } catch (RuntimeException ex) {
@@ -107,20 +131,42 @@ public class ChaosCommandDispatcher {
     return null;
   }
 
+  /**
+   * Stores the result under the Eureka instance id. Pods of one service share {@code pod-name}, so
+   * the body name would collapse two replicas into one result.
+   *
+   * @param body result returned by the instance
+   * @param instance instance the relay posted to
+   * @return the same result with {@code podName} set to the instance id
+   */
+  private static ChaosCommandResult keyedToInstance(
+      ChaosCommandResult body, ServiceInstance instance) {
+    return new ChaosCommandResult(
+        body.commandId(),
+        body.targetApplication(),
+        instanceKey(instance),
+        body.outcome(),
+        body.failedStep(),
+        body.httpStatus(),
+        body.reportedAt());
+  }
+
   private static ChaosCommandResult outcome(
       ChaosCommandMessage message,
       ServiceInstance instance,
       InstanceOutcome outcome,
       Integer httpStatus) {
-    String podName =
-        instance.getInstanceId() != null ? instance.getInstanceId() : instance.getHost();
     return new ChaosCommandResult(
         message.commandId(),
         message.targetApplication(),
-        podName,
+        instanceKey(instance),
         outcome,
         outcome.name().toLowerCase(),
         httpStatus,
         Instant.now());
+  }
+
+  private static String instanceKey(ServiceInstance instance) {
+    return instance.getInstanceId() != null ? instance.getInstanceId() : instance.getHost();
   }
 }

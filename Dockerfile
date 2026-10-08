@@ -63,6 +63,7 @@ HEALTHCHECK --interval=10s --timeout=5s --retries=12 --start-period=30s \
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
 
 FROM runtime-base AS chaos-command-relay
+RUN mkdir -p /data && chmod 777 /data
 COPY --from=build /app/chaos-command-relay/target/chaos-command-relay-*.jar /app/app.jar
 EXPOSE 8090
 HEALTHCHECK --interval=10s --timeout=5s --retries=12 --start-period=40s \

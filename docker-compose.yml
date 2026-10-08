@@ -118,6 +118,9 @@ services:
     environment:
       <<: *java-env
       CHAOS_RELAY_CLIENT_SECRET: ${CHAOS_RELAY_CLIENT_SECRET:-local-poc-only}
+      CHAOS_RELAY_DATA_DIR: /data
+    volumes:
+      - chaos-relay-data:/data
     depends_on:
       chaos-config-server:
         condition: service_healthy
@@ -177,3 +180,6 @@ services:
       args:
         VITE_DEMO_URL: /api/demo
         VITE_OPERATOR_CONSOLE_URL: /chaos
+
+volumes:
+  chaos-relay-data:

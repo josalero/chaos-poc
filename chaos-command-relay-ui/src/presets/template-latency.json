@@ -1,0 +1,14 @@
+{
+  "environment": "test",
+  "action": "CONFIGURE_AND_ENABLE",
+  "issuedBy": "chaos-console",
+  "correlationId": "template-latency",
+  "assault": {
+    "level": 1,
+    "deterministic": true,
+    "latencyActive": true,
+    "latencyRangeStart": 200,
+    "latencyRangeEnd": 800,
+    "exceptionsActive": false
+  }
+}

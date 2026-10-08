@@ -1,7 +1,10 @@
 package com.samba.chaos.relay.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.samba.chaos.command.ChaosAssaultConfig;
@@ -9,6 +12,8 @@ import com.samba.chaos.command.ChaosCommandAction;
 import com.samba.chaos.relay.config.ChaosRelayProperties;
 import com.samba.chaos.relay.console.ChaosMonkeyActuatorProbe;
 import com.samba.chaos.relay.console.ChaosMonkeyRuntimeSnapshot;
+import com.samba.chaos.relay.console.ChaosMonkeyStatusCache;
+import com.samba.chaos.relay.console.ChaosMonkeyStatusCache.Entry;
 import com.samba.chaos.relay.model.CommandAggregateStatus;
 import com.samba.chaos.relay.model.ServiceConfigState;
 import com.samba.chaos.relay.store.ChaosCommandStore;
@@ -27,6 +32,7 @@ class ChaosServiceStatusServiceTest {
   private ChaosCommandStatusService statusService;
   private TargetInstancesResolver instancesResolver;
   private ChaosMonkeyActuatorProbe probe;
+  private ChaosMonkeyStatusCache statusCache;
   private ChaosServiceStatusService service;
 
   @BeforeEach
@@ -35,18 +41,24 @@ class ChaosServiceStatusServiceTest {
     statusService = mock(ChaosCommandStatusService.class);
     instancesResolver = mock(TargetInstancesResolver.class);
     probe = mock(ChaosMonkeyActuatorProbe.class);
+    statusCache = mock(ChaosMonkeyStatusCache.class);
     ChaosRelayProperties properties = new ChaosRelayProperties();
     properties.setAllowedTargetApplications(List.of("orders"));
     when(instancesResolver.resolveUp("orders")).thenReturn(List.of());
     when(probe.probe("orders")).thenReturn(ChaosMonkeyRuntimeSnapshot.unconfigured());
+    when(statusCache.get("orders")).thenReturn(Optional.empty());
+    when(store.findByApplication(
+            org.mockito.ArgumentMatchers.eq("orders"), org.mockito.ArgumentMatchers.anyInt()))
+        .thenReturn(List.of());
     service =
-        new ChaosServiceStatusService(store, properties, statusService, instancesResolver, probe);
+        new ChaosServiceStatusService(
+            store, properties, statusService, instancesResolver, probe, statusCache);
   }
 
   @Test
   void unknownServiceIsEmpty() {
     assertThat(service.getService("billing")).isEmpty();
-    assertThat(service.getHistory("billing")).isEmpty();
+    assertThat(service.getHistory("billing", 50)).isEmpty();
     assertThat(service.probe("billing")).isEmpty();
   }
 
@@ -67,9 +79,11 @@ class ChaosServiceStatusServiceTest {
         .satisfies(
             summary -> {
               assertThat(summary.configState()).isEqualTo(ServiceConfigState.DEFAULT);
-              assertThat(summary.cmEnabled()).isFalse();
+              assertThat(summary.cmEnabled()).isNull();
+              assertThat(summary.cmCheckedAt()).isNull();
             });
-    assertThat(service.getHistory("orders")).contains(List.of());
+    verify(probe, never()).probe(org.mockito.ArgumentMatchers.any());
+    assertThat(service.getHistory("orders", 50)).contains(List.of());
     assertThat(service.getService("orders").orElseThrow().upInstanceIds()).isEmpty();
   }
 
@@ -130,6 +144,34 @@ class ChaosServiceStatusServiceTest {
     assertConfigState(CommandAggregateStatus.PARTIAL, ServiceConfigState.DESIRED);
     assertConfigState(CommandAggregateStatus.TIMED_OUT, ServiceConfigState.PARTIAL);
     assertConfigState(CommandAggregateStatus.PUBLISHED, ServiceConfigState.DEFAULT);
+  }
+
+  @Test
+  void listUsesCacheAndLatestCommand() {
+    Instant checkedAt = Instant.parse("2026-10-07T12:00:00Z");
+    when(statusCache.get("orders")).thenReturn(Optional.of(new Entry(true, 1, 1, checkedAt)));
+    CommandRecord record = record(ChaosCommandAction.CONFIGURE_AND_ENABLE);
+    when(store.findLatestByApplication("orders")).thenReturn(Optional.of(record));
+    when(statusService.aggregateStatus(record)).thenReturn(CommandAggregateStatus.APPLIED);
+
+    assertThat(service.listServices())
+        .singleElement()
+        .satisfies(
+            summary -> {
+              assertThat(summary.cmEnabled()).isTrue();
+              assertThat(summary.cmCheckedAt()).isEqualTo(checkedAt);
+              assertThat(summary.lastCommandStatus()).isEqualTo(CommandAggregateStatus.APPLIED);
+              assertThat(summary.expectedInstances()).isEqualTo(1);
+            });
+  }
+
+  @Test
+  void historyLimitIsClamped() {
+    service.getHistory("orders", 0);
+    service.getHistory("orders", 500);
+
+    verify(store).findByApplication(eq("orders"), eq(1));
+    verify(store).findByApplication(eq("orders"), eq(200));
   }
 
   private void assertConfigState(CommandAggregateStatus status, ServiceConfigState expected) {

@@ -1,189 +1,333 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { consoleActor, disableService, getHistory, listServices, submitCommand } from '../api/relayClient.js';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import {
+  getCommand,
+  listServices,
+  resetSelected,
+} from '../api/relayClient.js';
 import Notices from '../components/Notices.vue';
+import PageHeader from '../components/PageHeader.vue';
 import StatusBadge from '../components/StatusBadge.vue';
-import { commandFromPreset, commandRequestJson } from '../lib/commands.js';
 import { errorMessages } from '../lib/errors.js';
 import { serviceTitle } from '../lib/labels.js';
 import { showErrors } from '../lib/notices.js';
-import { presets } from '../presets/catalog.js';
+import { checkedAgo, selectAllShown, selectionSummary } from '../lib/serviceList.js';
+import { cmLabel, filterServices, pageServices, sortServices } from '../lib/serviceTable.js';
 
-const router = useRouter();
+const CONFIG_STATES = ['DEFAULT', 'DESIRED', 'APPLIED', 'PARTIAL', 'FAILED'];
+const SORTS = [
+  { key: 'name', label: 'Service' },
+  { key: 'cm', label: 'Chaos Monkey' },
+  { key: 'configState', label: 'Config' },
+  { key: 'up', label: 'UP' },
+  { key: 'lastStatus', label: 'Last command' },
+];
+
 const services = ref([]);
-const historyByService = ref({});
 const loading = ref(true);
 const loadError = ref('');
-const target = ref(presets[0]?.targetApplication || '');
-const scenarioId = ref('');
-const applying = ref(false);
+const query = ref('');
+const cm = ref('any');
+const configState = ref('');
+const sortKey = ref('name');
+const sortDirection = ref('asc');
+const page = ref(0);
+const selected = ref([]);
+const resetting = ref(false);
+const progress = ref([]);
+let refreshTimer;
+let pollTimer;
 
-const targets = computed(() => [...new Set(presets.map((preset) => preset.targetApplication))]);
-const scenarios = computed(() =>
-  presets.filter((preset) => preset.targetApplication === target.value && preset.action !== 'DISABLE'),
+const titled = computed(() =>
+  services.value.map((service) => ({
+    ...service,
+    title: serviceTitle(service.applicationName),
+  })),
 );
-const disablePreset = computed(() =>
-  presets.find((preset) => preset.targetApplication === target.value && preset.action === 'DISABLE'),
+const filtered = computed(() =>
+  filterServices(titled.value, {
+    query: query.value,
+    cm: cm.value,
+    configState: configState.value,
+  }),
 );
-const selected = computed(() => scenarios.value.find((preset) => preset.id === scenarioId.value));
+const sorted = computed(() =>
+  sortServices(filtered.value, { key: sortKey.value, direction: sortDirection.value }),
+);
+const table = computed(() => pageServices(sorted.value, page.value));
+const summary = computed(() =>
+  selectionSummary(
+    selected.value,
+    filtered.value.map((service) => service.applicationName),
+    titled.value.length,
+  ),
+);
+const caption = computed(() => {
+  const current = summary.value;
+  const range = `${current.shown} shown of ${current.total}`;
+  if (current.selected === 0) {
+    return range;
+  }
+  if (current.hidden === 0) {
+    return `${current.selected} selected · ${range}`;
+  }
+  return `${current.selected} selected, ${current.hidden} hidden by the filter · ${range}`;
+});
+const allShownSelected = computed(
+  () =>
+    filtered.value.length > 0
+    && filtered.value.every((service) => selected.value.includes(service.applicationName)),
+);
 
-onMounted(async () => {
+watch([query, cm, configState], () => {
+  page.value = 0;
+});
+
+onMounted(() => {
+  refresh();
+  refreshTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      refresh();
+    }
+  }, 15000);
+});
+
+onUnmounted(() => {
+  clearInterval(refreshTimer);
+  clearInterval(pollTimer);
+});
+
+async function refresh() {
   try {
     services.value = await listServices();
-    const histories = await Promise.all(
-      services.value.map((service) => getHistory(service.applicationName).catch(() => [])),
-    );
-    historyByService.value = Object.fromEntries(
-      services.value.map((service, index) => [service.applicationName, histories[index]]),
-    );
-    if (!target.value && services.value[0]) {
-      target.value = services.value[0].applicationName;
-    }
+    loadError.value = '';
   } catch (error) {
     loadError.value = errorMessages(error, 'Could not load services')[0];
   } finally {
     loading.value = false;
   }
-});
-
-function latestRequest(service) {
-  const latest = historyByService.value[service.applicationName]?.[0];
-  return latest ? commandRequestJson(latest) : '';
 }
 
-function onTargetChange() {
-  scenarioId.value = '';
+function toggleSort(key) {
+  if (sortKey.value === key) {
+    sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortKey.value = key;
+    sortDirection.value = 'asc';
+  }
+  page.value = 0;
 }
 
-async function applyPreset(preset) {
-  applying.value = true;
+function ariaSort(key) {
+  if (sortKey.value !== key) {
+    return 'none';
+  }
+  return sortDirection.value === 'asc' ? 'ascending' : 'descending';
+}
+
+function toggleShown(checked) {
+  selected.value = selectAllShown(
+    selected.value,
+    filtered.value.map((service) => service.applicationName),
+    checked,
+  );
+}
+
+function toggleOne(name, checked) {
+  selected.value = selectAllShown(selected.value, [name], checked);
+}
+
+function confirmReset() {
+  if (selected.value.length === 0) {
+    return;
+  }
+  const names = selected.value.join('\n');
+  if (!window.confirm(`Turn off Chaos Monkey on:\n${names}`)) {
+    return;
+  }
+  startReset();
+}
+
+async function startReset() {
+  resetting.value = true;
   try {
-    const submitted = await submitCommand(commandFromPreset(preset));
-    await router.push({ name: 'command', params: { commandId: submitted.commandId } });
+    const result = await resetSelected(selected.value);
+    progress.value = (result.services || []).map((service) => ({
+      applicationName: service.applicationName,
+      commandId: service.commandId,
+      status: service.commandId ? 'PENDING' : 'FAILED',
+      errors: service.errors || [],
+    }));
+    pollProgress();
   } catch (error) {
     showErrors(errorMessages(error));
-  } finally {
-    applying.value = false;
+    resetting.value = false;
   }
 }
 
-async function turnOff(applicationName) {
-  try {
-    const submitted = await disableService(applicationName, consoleActor());
-    await router.push({ name: 'command', params: { commandId: submitted.commandId } });
-  } catch (error) {
-    showErrors(errorMessages(error));
-  }
+function pollProgress() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    const pending = progress.value.filter((item) => item.commandId && !isTerminal(item.status));
+    if (pending.length === 0) {
+      clearInterval(pollTimer);
+      resetting.value = false;
+      await refresh();
+      return;
+    }
+    const updates = await Promise.all(
+      pending.map(async (item) => {
+        try {
+          const command = await getCommand(item.commandId);
+          return { commandId: item.commandId, status: command.status };
+        } catch {
+          return { commandId: item.commandId, status: item.status };
+        }
+      }),
+    );
+    progress.value = progress.value.map((item) => {
+      const update = updates.find((candidate) => candidate.commandId === item.commandId);
+      return update ? { ...item, status: update.status } : item;
+    });
+  }, 2000);
+}
+
+function isTerminal(status) {
+  return status === 'APPLIED' || status === 'FAILED' || status === 'TIMED_OUT';
 }
 </script>
 
 <template>
   <Notices />
-  <p v-if="loadError" class="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900" role="alert">
-    {{ loadError }}
-  </p>
+  <p v-if="loadError" class="alert alert-error" role="alert">{{ loadError }}</p>
 
-  <header class="mb-6 flex flex-wrap items-end justify-between gap-4">
-    <div>
-      <p class="text-xs font-semibold tracking-widest text-orange-800">CONTROL PLANE</p>
-      <h1 class="text-3xl font-semibold">Chaos command relay</h1>
-      <p class="mt-1 text-stone-600">Choose a service and scenario, publish the patch, then verify its effect.</p>
-    </div>
-    <ol class="flex gap-3 text-sm text-stone-600" aria-label="Experiment workflow">
-      <li><span class="mr-1 font-semibold text-stone-900">1</span>Target</li>
-      <li><span class="mr-1 font-semibold text-stone-900">2</span>Scenario</li>
-      <li><span class="mr-1 font-semibold text-stone-900">3</span>Verify</li>
-    </ol>
-  </header>
-
-  <section class="mb-8" aria-labelledby="targets-title" :aria-busy="loading">
-    <div class="mb-3 flex items-baseline justify-between">
-      <div>
-        <h2 id="targets-title" class="text-lg font-semibold">Services</h2>
-        <p class="text-sm text-stone-500">Live state reported by relay and actuator</p>
-      </div>
-      <span class="text-sm text-stone-500">{{ services.length }} targets</span>
-    </div>
-    <p v-if="loading" class="text-sm text-stone-500">Loading services…</p>
-    <p v-else-if="services.length === 0" class="rounded-lg border border-dashed border-stone-300 p-4 text-sm text-stone-600">
-      No allowlisted services were returned.
-    </p>
-    <div v-else class="grid gap-3 md:grid-cols-2">
-      <article
-        v-for="service in services"
-        :key="service.applicationName"
-        class="rounded-xl border bg-white p-4"
-        :class="service.cmEnabled ? 'border-orange-300' : 'border-stone-200'"
+  <PageHeader
+    title="Services"
+    description="Allowlisted targets, Chaos Monkey state, and the last command. Open a row to inspect or apply an assault."
+  >
+    <template #actions>
+      <button type="button" class="btn" @click="refresh">Refresh</button>
+      <button
+        type="button"
+        class="btn"
+        :class="{ 'btn-danger': selected.length > 0 }"
+        :disabled="selected.length === 0 || resetting"
+        @click="confirmReset"
       >
-        <div class="flex items-start justify-between gap-3">
-          <div>
-            <strong class="block">{{ serviceTitle(service.applicationName) }}</strong>
-            <small class="mono text-stone-500">{{ service.applicationName }}</small>
-          </div>
-          <details class="relative">
-            <summary class="cursor-pointer list-none rounded-md px-2 py-1 text-stone-500" :aria-label="`Actions for ${service.applicationName}`">•••</summary>
-            <div class="absolute right-0 z-10 mt-1 w-48 rounded-lg border border-stone-200 bg-white p-1 text-sm shadow-lg">
-              <RouterLink class="block rounded px-2 py-1 hover:bg-stone-50" :to="{ name: 'service', params: { applicationName: service.applicationName }, query: { tab: 'overview' } }">Status</RouterLink>
-              <RouterLink class="block rounded px-2 py-1 hover:bg-stone-50" :to="{ name: 'service', params: { applicationName: service.applicationName }, query: { tab: 'commands' } }">History</RouterLink>
-              <RouterLink class="block rounded px-2 py-1 hover:bg-stone-50" :to="{ name: 'service', params: { applicationName: service.applicationName }, query: { tab: 'maintenance' } }">Reset &amp; maintenance</RouterLink>
-              <button v-if="service.cmEnabled" type="button" class="block w-full rounded px-2 py-1 text-left hover:bg-stone-50" @click="turnOff(service.applicationName)">Turn off chaos</button>
-            </div>
-          </details>
-        </div>
-        <details v-if="latestRequest(service)" open class="mt-3">
-          <summary class="cursor-pointer text-sm font-medium">Last request JSON</summary>
-          <pre class="mono mt-2 max-h-48 overflow-auto rounded-lg bg-stone-900 p-3 text-xs text-stone-100">{{ latestRequest(service) }}</pre>
-        </details>
-        <p v-else class="mt-3 text-sm text-stone-500">No request has been applied yet.</p>
-        <dl class="mt-3 grid grid-cols-3 gap-2 text-sm">
-          <div><dt class="text-stone-500">CM</dt><dd :class="service.cmEnabled ? 'font-semibold text-orange-800' : 'text-emerald-800'">{{ service.cmEnabled ? 'ON' : 'OFF' }}</dd></div>
-          <div><dt class="text-stone-500">Replicas</dt><dd>{{ service.eurekaUpCount }}/{{ service.expectedInstances }}</dd></div>
-          <div><dt class="text-stone-500">Last patch</dt><dd><StatusBadge :status="service.lastCommandStatus" /></dd></div>
-        </dl>
-      </article>
-    </div>
-  </section>
-
-  <section aria-labelledby="scenario-title">
-    <div class="mb-3 flex items-baseline justify-between">
-      <div>
-        <h2 id="scenario-title" class="text-lg font-semibold">Run an experiment</h2>
-        <p class="text-sm text-stone-500">Commands use a two-hour lease and apply to every expected replica.</p>
-      </div>
-      <RouterLink class="text-sm text-stone-600 underline" to="/commands/new">Advanced JSON</RouterLink>
-    </div>
-    <p v-if="presets.length === 0" class="rounded-lg border border-dashed border-stone-300 p-4 text-sm">No scenarios are packaged with this console.</p>
-    <form v-else class="rounded-xl border border-stone-200 bg-white p-4" @submit.prevent="selected && applyPreset(selected)">
-      <div class="grid gap-4 md:grid-cols-2">
-        <label class="block text-sm font-medium" for="target-select">
-          Target service
-          <select id="target-select" v-model="target" class="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2" @change="onTargetChange">
-            <option v-for="name in targets" :key="name" :value="name">{{ serviceTitle(name) }}</option>
-          </select>
-        </label>
-        <label class="block text-sm font-medium" for="scenario-select">
-          Scenario
-          <select id="scenario-select" v-model="scenarioId" class="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2" required>
-            <option value="" disabled>Select a scenario…</option>
-            <option v-for="preset in scenarios" :key="preset.id" :value="preset.id">{{ preset.label }}</option>
-          </select>
-        </label>
-      </div>
-      <div class="mt-4 rounded-lg bg-stone-50 p-3" aria-live="polite">
-        <strong class="block">{{ selected?.label || 'No scenario selected' }}</strong>
-        <p class="text-sm text-stone-600">{{ selected?.description || 'Choose a scenario to see the expected behavior before publishing.' }}</p>
-      </div>
-      <button type="submit" class="mt-4 rounded-md bg-stone-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="!selected || applying">
-        {{ applying ? 'Publishing…' : 'Apply scenario' }}
+        Reset selected
       </button>
-      <details v-if="disablePreset" class="mt-4 text-sm">
-        <summary class="cursor-pointer">Need to stop the experiment?</summary>
-        <p class="mt-2 text-stone-600">{{ disablePreset.description }}</p>
-        <button type="button" class="mt-2 rounded-md bg-red-700 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="applying" @click="applyPreset(disablePreset)">
-          Turn off chaos
-        </button>
-      </details>
-    </form>
+    </template>
+  </PageHeader>
+
+  <section aria-labelledby="targets-title" :aria-busy="loading">
+    <h2 id="targets-title" class="sr-only">Allowlist</h2>
+    <div class="toolbar cols-3">
+      <label class="field" for="service-search">Search
+        <input id="service-search" v-model="query" type="search" placeholder="Name or title" />
+      </label>
+      <label class="field" for="cm-filter">Chaos Monkey
+        <select id="cm-filter" v-model="cm">
+          <option value="any">Any</option>
+          <option value="on">On</option>
+          <option value="off">Off</option>
+          <option value="unknown">Unknown</option>
+        </select>
+      </label>
+      <label class="field" for="config-filter">Config state
+        <select id="config-filter" v-model="configState">
+          <option value="">Any</option>
+          <option v-for="state in CONFIG_STATES" :key="state" :value="state">{{ state }}</option>
+        </select>
+      </label>
+    </div>
+
+    <p v-if="loading" class="empty">Loading services.</p>
+    <div v-else-if="titled.length === 0" class="empty">
+      <h2>No services on the allowlist</h2>
+      <p>The relay returned no targets this console can command.</p>
+    </div>
+    <div v-else class="panel">
+      <div class="bar">
+        <label class="check-row">
+          <input type="checkbox" :checked="allShownSelected" @change="toggleShown($event.target.checked)" />
+          Select all shown
+        </label>
+        <p class="nums meta">{{ caption }}</p>
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th scope="col"><span class="sr-only">Select</span></th>
+              <th
+                v-for="column in SORTS"
+                :key="column.key"
+                scope="col"
+                :aria-sort="ariaSort(column.key)"
+              >
+                <button type="button" class="sort-btn" @click="toggleSort(column.key)">
+                  {{ column.label }}
+                  <svg v-if="sortKey === column.key" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                    <path
+                      v-if="sortDirection === 'asc'"
+                      d="M6 2.5 9.2 7H2.8L6 2.5Z"
+                      fill="currentColor"
+                    />
+                    <path v-else d="M6 9.5 2.8 5h6.4L6 9.5Z" fill="currentColor" />
+                  </svg>
+                </button>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="service in table.content"
+              :key="service.applicationName"
+              :class="{ 'is-selected': selected.includes(service.applicationName) }"
+            >
+              <td>
+                <input
+                  type="checkbox"
+                  :checked="selected.includes(service.applicationName)"
+                  :aria-label="`Select ${service.applicationName}`"
+                  @change="toggleOne(service.applicationName, $event.target.checked)"
+                />
+              </td>
+              <td>
+                <RouterLink class="row-link" :to="{ name: 'service', params: { applicationName: service.applicationName } }">
+                  {{ service.title }}
+                </RouterLink>
+                <small class="mono sub">{{ service.applicationName }}</small>
+              </td>
+              <td :class="{ hot: service.cmEnabled }">
+                {{ cmLabel(service) }}
+                <small class="sub">{{ checkedAgo(service.cmCheckedAt) }}</small>
+              </td>
+              <td>{{ service.configState }}</td>
+              <td class="nums">{{ service.eurekaUpCount }}</td>
+              <td><StatusBadge :status="service.lastCommandStatus" /></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-if="table.total === 0" class="panel-pad meta">No services match the current search.</p>
+      <div v-else class="pager">
+        <p class="nums">Page {{ table.page + 1 }} of {{ table.pages }}</p>
+        <div class="button-row">
+          <button type="button" class="btn" :disabled="table.page === 0" @click="page = table.page - 1">Previous</button>
+          <button type="button" class="btn" :disabled="table.page >= table.pages - 1" @click="page = table.page + 1">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <ul v-if="progress.length" class="panel progress-list" aria-live="polite">
+      <li v-for="item in progress" :key="item.applicationName">
+        <span>{{ serviceTitle(item.applicationName) }}</span>
+        <span>
+          <StatusBadge :status="item.status" />
+          <span v-if="item.errors.length"> {{ item.errors.map((error) => error.message).join(', ') }}</span>
+        </span>
+      </li>
+    </ul>
   </section>
 </template>

@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.samba.chaos.command.ChaosCommandAction;
+import com.samba.chaos.relay.model.ChaosCommandPageResponse;
 import com.samba.chaos.relay.model.ChaosCommandRequest;
 import com.samba.chaos.relay.model.ChaosCommandStatusResponse;
 import com.samba.chaos.relay.model.ChaosCommandSubmitResponse;
@@ -59,5 +60,22 @@ class ChaosCommandControllerTest {
         .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
     assertThat(controller.getStatus(commandId).getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(controller.getStatus(commandId).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+  }
+
+  @Test
+  void listsCommandsAndRejectsUnknownFilters() {
+    ChaosCommandPageResponse page = new ChaosCommandPageResponse(List.of(), 0, 50, 0);
+    when(commandService.list(0, 50, null, null, null)).thenReturn(page);
+    when(commandService.list(
+            0, 50, "orders", CommandAggregateStatus.APPLIED, ChaosCommandAction.DISABLE))
+        .thenReturn(page);
+
+    assertThat(controller.list(0, 50, " ", " ", " ").getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(controller.list(0, 50, "orders", "APPLIED", "DISABLE").getStatusCode())
+        .isEqualTo(HttpStatus.OK);
+    assertThat(controller.list(0, 50, null, "NOPE", null).getStatusCode())
+        .isEqualTo(HttpStatus.BAD_REQUEST);
+    assertThat(controller.list(0, 50, null, null, "NOPE").getStatusCode())
+        .isEqualTo(HttpStatus.BAD_REQUEST);
   }
 }

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   clearDemoData,
@@ -9,26 +9,33 @@ import {
   getActuator,
   getHistory,
   getService,
+  listServices,
   resetService,
 } from '../api/relayClient.js';
 import Notices from '../components/Notices.vue';
+import PageHeader from '../components/PageHeader.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import CommandFormView from './CommandFormView.vue';
 import { commandRequestJson, leaseExpiresAt } from '../lib/commands.js';
 import { errorMessages } from '../lib/errors.js';
 import { showErrors, showSuccess } from '../lib/notices.js';
+import { serviceTitle } from '../lib/labels.js';
+import { checkedAgo, nextHistoryLimit } from '../lib/serviceList.js';
+import { cmLabel } from '../lib/serviceTable.js';
 import { chaosMonkeyYaml } from '../lib/yaml.js';
 
 const TABS = [
-  { id: 'overview', label: 'Status' },
+  { id: 'overview', label: 'Overview' },
   { id: 'commands', label: 'History' },
   { id: 'actuator', label: 'Actuator' },
-  { id: 'maintenance', label: 'Reset' },
+  { id: 'apply', label: 'Apply' },
 ];
 
 const route = useRoute();
 const router = useRouter();
 const status = ref(null);
 const history = ref([]);
+const historyLimit = ref(50);
 const actuator = ref(null);
 const loading = ref(true);
 const loadError = ref('');
@@ -38,10 +45,19 @@ const dialogText = ref('');
 const dialogTitle = ref('');
 const dialogHint = ref('');
 const dialog = ref(null);
+let actuatorTimer;
 
 const applicationName = computed(() => route.params.applicationName);
+const title = computed(() => serviceTitle(applicationName.value));
+const crumbs = computed(() => [
+  { label: 'Services', to: '/' },
+  { label: title.value },
+]);
 const tab = computed(() =>
   TABS.some((item) => item.id === route.query.tab) ? route.query.tab : 'overview',
+);
+const catalogId = computed(() =>
+  typeof route.query.catalogId === 'string' ? route.query.catalogId : '',
 );
 
 function pretty(value) {
@@ -51,9 +67,8 @@ function pretty(value) {
 function formatInstant(value) {
   if (!value) return '—';
   return new Intl.DateTimeFormat(undefined, {
-    month: 'long',
+    month: 'short',
     day: 'numeric',
-    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
@@ -66,24 +81,42 @@ async function loadActuator() {
     actuator.value = {
       configured: false,
       reachable: false,
+      instances: [],
       errorMessage: errorMessages(error, 'Could not read the actuator')[0],
     };
   }
+}
+
+function stopActuatorPoll() {
+  clearInterval(actuatorTimer);
+  actuatorTimer = null;
+}
+
+function startActuatorPoll() {
+  stopActuatorPoll();
+  if (tab.value !== 'actuator' || !status.value) {
+    return;
+  }
+  loadActuator();
+  actuatorTimer = setInterval(() => {
+    if (document.visibilityState === 'visible' && tab.value === 'actuator') {
+      loadActuator();
+    }
+  }, 5000);
 }
 
 async function load() {
   loading.value = true;
   loadError.value = '';
   try {
-    const [service, commands] = await Promise.all([
+    const [service, commands, services] = await Promise.all([
       getService(applicationName.value),
-      getHistory(applicationName.value),
+      getHistory(applicationName.value, historyLimit.value),
+      listServices().catch(() => []),
     ]);
-    status.value = service;
+    const summary = services.find((item) => item.applicationName === applicationName.value);
+    status.value = { ...service, cmCheckedAt: summary?.cmCheckedAt ?? null };
     history.value = commands;
-    if (tab.value === 'actuator') {
-      await loadActuator();
-    }
   } catch (error) {
     status.value = null;
     loadError.value =
@@ -92,15 +125,18 @@ async function load() {
         : errorMessages(error, 'Could not load this service')[0];
   } finally {
     loading.value = false;
+    startActuatorPoll();
   }
 }
 
+async function loadMore() {
+  historyLimit.value = nextHistoryLimit(historyLimit.value);
+  history.value = await getHistory(applicationName.value, historyLimit.value);
+}
+
 watch(applicationName, load, { immediate: true });
-watch(tab, (next) => {
-  if (next === 'actuator' && status.value) {
-    loadActuator();
-  }
-});
+watch(tab, startActuatorPoll);
+onUnmounted(stopActuatorPoll);
 
 function openDialog(title, hint, text) {
   dialogTitle.value = title;
@@ -178,158 +214,208 @@ async function clearData() {
 </script>
 
 <template>
-  <RouterLink class="text-sm text-stone-600 underline" to="/">Back to scenarios</RouterLink>
-  <p v-if="loading" class="mt-4 text-sm text-stone-500">Loading service…</p>
-  <p v-else-if="loadError" class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900" role="alert">
-    {{ loadError }}
-  </p>
+  <PageHeader
+    :title="title"
+    :description="applicationName"
+    :crumbs="crumbs"
+  />
+  <p v-if="loading" class="empty">Loading service.</p>
+  <p v-else-if="loadError" class="alert alert-error" role="alert">{{ loadError }}</p>
 
   <template v-else-if="status">
-    <header class="mt-4">
-      <p class="text-xs font-semibold tracking-widest text-orange-800">SERVICE</p>
-      <h1 class="mono text-2xl font-semibold">{{ status.applicationName }}</h1>
-      <p class="text-stone-600">Status, history, and reset for this target.</p>
-    </header>
     <Notices />
 
-    <div class="mt-4 flex flex-wrap gap-2 border-b border-stone-200" role="tablist" aria-label="Service sections">
+    <div class="tabs" role="tablist" aria-label="Service sections">
       <RouterLink
         v-for="item in TABS"
         :key="item.id"
-        role="tab"
-        class="border-b-2 px-3 py-2 text-sm"
-        :class="tab === item.id ? 'border-stone-900 font-semibold' : 'border-transparent text-stone-500'"
-        :aria-selected="tab === item.id"
+        custom
         :to="{ name: 'service', params: { applicationName: status.applicationName }, query: { tab: item.id } }"
+        v-slot="{ href, navigate }"
       >
-        {{ item.label }}
-        <span v-if="item.id === 'commands' && history.length" class="ml-1 rounded-full bg-stone-200 px-1.5 text-xs">{{ history.length }}</span>
+        <a
+          :id="`tab-${item.id}`"
+          :href="href"
+          role="tab"
+          class="tab"
+          :aria-selected="tab === item.id"
+          :aria-controls="`${item.id}-panel`"
+          @click="navigate"
+        >
+          {{ item.label }}
+          <span v-if="item.id === 'commands' && history.length" class="tab-count">{{ history.length }}</span>
+        </a>
       </RouterLink>
     </div>
 
-    <section v-if="tab === 'overview'" class="mt-4 rounded-xl border border-stone-200 bg-white p-5" role="tabpanel">
-      <h2 class="text-lg font-semibold">Service summary</h2>
-      <p class="text-sm text-stone-500">Relay-tracked state vs live actuator when reachable.</p>
-      <dl class="mt-4 grid gap-3 sm:grid-cols-4">
-        <div class="rounded-lg bg-stone-50 p-3"><dt class="text-sm text-stone-500">Relay state</dt><dd>{{ status.configState }}</dd></div>
-        <div class="rounded-lg bg-stone-50 p-3"><dt class="text-sm text-stone-500">CM (actuator)</dt><dd>{{ status.cmEnabled ? 'On' : 'Off' }}</dd></div>
-        <div class="rounded-lg bg-stone-50 p-3"><dt class="text-sm text-stone-500">Replicas</dt><dd>{{ status.eurekaUpCount }} / {{ status.expectedInstances }}</dd></div>
-        <div v-if="status.lastCommandId" class="rounded-lg bg-stone-50 p-3">
-          <dt class="text-sm text-stone-500">Last command</dt>
-          <dd>
-            <RouterLink class="underline" :to="{ name: 'command', params: { commandId: status.lastCommandId } }">{{ String(status.lastCommandId).slice(0, 8) }}</RouterLink>
-            <StatusBadge class="ml-1" :status="status.lastCommandStatus" />
-          </dd>
+    <section v-if="tab === 'overview'" id="overview-panel" class="stack" role="tabpanel" aria-labelledby="tab-overview">
+      <div class="panel panel-pad">
+        <h2>Service summary</h2>
+        <dl class="facts cols-4">
+          <div>
+            <dt>Registry</dt>
+            <dd>{{ status.registryEnabled ? 'Enabled' : 'Disabled' }}</dd>
+          </div>
+          <div>
+            <dt>Config</dt>
+            <dd>{{ status.configState }}</dd>
+          </div>
+          <div>
+            <dt>Chaos Monkey</dt>
+            <dd>{{ cmLabel(status) }} <small class="sub">{{ checkedAgo(status.cmCheckedAt) }}</small></dd>
+          </div>
+          <div>
+            <dt>Replicas</dt>
+            <dd class="nums">{{ status.eurekaUpCount }} UP / {{ status.expectedInstances }} expected</dd>
+          </div>
+          <div v-if="status.lastCommandId">
+            <dt>Last command</dt>
+            <dd>
+              <RouterLink class="row-link" :to="{ name: 'command', params: { commandId: status.lastCommandId } }">{{ String(status.lastCommandId).slice(0, 8) }}</RouterLink>
+              <StatusBadge :status="status.lastCommandStatus" />
+              <small class="sub">{{ formatInstant(status.lastPublishedAt) }} · {{ status.lastIssuedBy || '—' }}</small>
+            </dd>
+          </div>
+        </dl>
+        <div v-if="status.upInstanceIds?.length">
+          <h3>UP instances</h3>
+          <ul class="id-list">
+            <li v-for="instanceId in status.upInstanceIds" :key="instanceId" class="mono">{{ instanceId }}</li>
+          </ul>
         </div>
-      </dl>
-      <div v-if="status.upInstanceIds?.length" class="mt-4">
-        <h3 class="text-sm font-medium">UP instances</h3>
-        <ul class="mt-2 flex flex-wrap gap-2">
-          <li v-for="instanceId in status.upInstanceIds" :key="instanceId" class="mono rounded-md bg-stone-100 px-2 py-1 text-xs">{{ instanceId }}</li>
-        </ul>
+        <div class="button-row">
+          <RouterLink custom :to="{ query: { tab: 'apply' } }" v-slot="{ href, navigate }">
+            <a :href="href" class="btn btn-primary" @click="navigate">Apply an assault</a>
+          </RouterLink>
+          <RouterLink custom :to="{ query: { tab: 'actuator' } }" v-slot="{ href, navigate }">
+            <a :href="href" class="btn" @click="navigate">View live actuator</a>
+          </RouterLink>
+          <button type="button" class="btn btn-danger" :disabled="busy !== ''" @click="reset">Reset</button>
+        </div>
       </div>
-      <div class="mt-4 flex flex-wrap gap-2">
-        <RouterLink class="rounded-md bg-stone-900 px-4 py-2 text-sm font-semibold text-white" :to="{ name: 'publish', query: { applicationName: status.applicationName } }">Configure new assault</RouterLink>
-        <RouterLink class="rounded-md border border-stone-300 px-4 py-2 text-sm" :to="{ name: 'publish', query: { applicationName: status.applicationName, instanceSelection: 'SOME' } }">Apply to some instances</RouterLink>
-        <RouterLink class="rounded-md border border-stone-300 px-4 py-2 text-sm" :to="{ query: { tab: 'actuator' } }">View live actuator</RouterLink>
+      <div class="panel panel-pad">
+        <h2>Maintenance</h2>
+        <p class="meta">Reset waits until the disable command is applied. Clear demo data resets in-memory orders and inventory.</p>
+        <div class="button-row">
+          <button type="button" class="btn" :disabled="busy !== ''" @click="turnOff">Disable</button>
+          <button type="button" class="btn" :disabled="busy !== ''" @click="clearData">Clear demo data</button>
+        </div>
+        <form class="narrow" @submit.prevent="enable">
+          <h3>Enable Chaos Monkey</h3>
+          <label class="field" for="expires-at">Expires at (ISO-8601)
+            <input id="expires-at" v-model="expiresAt" />
+          </label>
+          <button type="submit" class="btn btn-primary" :disabled="busy !== ''">Enable</button>
+        </form>
+        <div class="split">
+          <div>
+            <h3>Desired assault</h3>
+            <pre class="mono code-plain">{{ pretty(status.desiredAssault) }}</pre>
+          </div>
+          <div>
+            <h3>Applied assault</h3>
+            <pre class="mono code-plain">{{ pretty(status.appliedAssault) }}</pre>
+          </div>
+        </div>
       </div>
     </section>
 
-    <section v-else-if="tab === 'actuator'" class="mt-4 rounded-xl border border-stone-200 bg-white p-5" role="tabpanel">
-      <h2 class="text-lg font-semibold">Live Chaos Monkey</h2>
-      <p class="text-sm text-stone-500">Read from the target service actuator.</p>
-      <p v-if="!actuator" class="mt-3 text-sm text-stone-500">Loading actuator…</p>
-      <p v-else-if="!actuator.configured" class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm" role="alert">
+    <section v-else-if="tab === 'actuator'" id="actuator-panel" class="stack" role="tabpanel" aria-labelledby="tab-actuator">
+      <div class="page-head-row">
+        <div>
+          <h2>Live Chaos Monkey</h2>
+          <p class="meta">Each UP instance is read again every 5 seconds while this section is open.</p>
+        </div>
+        <button type="button" class="btn" @click="loadActuator">Refresh</button>
+      </div>
+      <p v-if="!actuator" class="empty">Loading actuator.</p>
+      <p v-else-if="!actuator.configured" class="alert alert-error" role="alert">
         No UP instances of this service are registered in discovery.
       </p>
-      <p v-else-if="!actuator.reachable" class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm" role="alert">
-        Could not reach Chaos Monkey actuator: {{ actuator.errorMessage }}
+      <p v-else-if="!actuator.reachable" class="alert alert-error" role="alert">
+        Could not reach the Chaos Monkey actuator. {{ actuator.errorMessage }}
       </p>
-      <div v-else class="mt-3 grid gap-4 md:grid-cols-2">
-        <p>Enabled: <strong>{{ actuator.enabled ? 'Yes' : 'No' }}</strong></p>
-        <div class="md:col-span-2 grid gap-4 md:grid-cols-2">
-          <div><h3 class="font-medium">Status</h3><pre class="mono mt-2 overflow-auto rounded-lg bg-stone-900 p-3 text-xs text-stone-100">{{ actuator.statusJson || '—' }}</pre></div>
-          <div><h3 class="font-medium">Assaults</h3><pre class="mono mt-2 overflow-auto rounded-lg bg-stone-900 p-3 text-xs text-stone-100">{{ actuator.assaultsJson || '—' }}</pre></div>
+      <template v-else>
+        <p>Any instance on: <strong>{{ actuator.enabled ? 'Yes' : 'No' }}</strong></p>
+        <article v-for="instance in actuator.instances || []" :key="instance.instanceId" class="panel panel-pad">
+          <h3 class="mono">{{ instance.instanceId }}</h3>
+          <p v-if="instance.error" class="alert alert-error" role="alert">{{ instance.error }}</p>
+          <template v-else>
+            <p>Enabled: <strong>{{ instance.enabled ? 'Yes' : 'No' }}</strong></p>
+            <div class="split">
+            <div>
+              <h4>Status</h4>
+              <pre class="mono code">{{ instance.statusJson || '—' }}</pre>
+            </div>
+            <div>
+              <h4>Assaults</h4>
+              <pre class="mono code">{{ instance.assaultsJson || '—' }}</pre>
+            </div>
+            </div>
+          </template>
+        </article>
+      </template>
+    </section>
+
+    <section v-else-if="tab === 'commands'" id="commands-panel" class="stack" role="tabpanel" aria-labelledby="tab-commands">
+      <h2>Command history</h2>
+      <p class="meta">Newest command first.</p>
+      <div v-if="history.length === 0" class="empty">
+        <h2>No commands yet</h2>
+        <p><RouterLink :to="{ query: { tab: 'apply' } }">Apply the first assault</RouterLink>.</p>
+      </div>
+      <div v-else class="panel">
+        <div class="table-wrap">
+          <table class="data">
+            <thead>
+              <tr>
+                <th scope="col">Published</th>
+                <th scope="col">Action</th>
+                <th scope="col">Status</th>
+                <th scope="col">Issued by</th>
+                <th scope="col">Results</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="entry in history" :key="entry.commandId">
+                <td>{{ formatInstant(entry.publishedAt) }}</td>
+                <td class="mono">{{ entry.action }}</td>
+                <td><StatusBadge :status="entry.status" /></td>
+                <td>{{ entry.issuedBy || '—' }}</td>
+                <td class="nums">{{ entry.successCount }} ok / {{ entry.failureCount }} failed</td>
+                <td>
+                  <div class="button-row">
+                    <RouterLink class="btn" :to="{ name: 'command', params: { commandId: entry.commandId } }">Details</RouterLink>
+                    <button type="button" class="btn" @click="openRequest(entry)">JSON</button>
+                    <button type="button" class="btn" @click="openYaml(entry)">YAML</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="history.length >= historyLimit && historyLimit < 200" class="pager">
+          <button type="button" class="btn" @click="loadMore">Load more</button>
         </div>
       </div>
     </section>
 
-    <section v-else-if="tab === 'commands'" class="mt-4 rounded-xl border border-stone-200 bg-white p-5" role="tabpanel">
-      <h2 class="text-lg font-semibold">Patch history</h2>
-      <p class="text-sm text-stone-500">Newest command first.</p>
-      <p v-if="history.length === 0" class="mt-4 text-sm text-stone-600">
-        No commands published yet.
-        <RouterLink class="underline" :to="{ name: 'publish', query: { applicationName: status.applicationName } }">Publish the first command</RouterLink>.
-      </p>
-      <div v-else class="mt-4 overflow-x-auto">
-        <table class="w-full text-left text-sm">
-          <thead>
-            <tr class="border-b border-stone-200 text-stone-500">
-              <th class="py-2 pr-3 font-medium" scope="col">Published</th>
-              <th class="py-2 pr-3 font-medium" scope="col">Action</th>
-              <th class="py-2 pr-3 font-medium" scope="col">Status</th>
-              <th class="py-2 pr-3 font-medium" scope="col">Issued by</th>
-              <th class="py-2 pr-3 font-medium" scope="col">Results</th>
-              <th class="py-2 font-medium" scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="entry in history" :key="entry.commandId" class="border-b border-stone-100">
-              <td class="py-2 pr-3">{{ formatInstant(entry.publishedAt) }}</td>
-              <td class="mono py-2 pr-3">{{ entry.action }}</td>
-              <td class="py-2 pr-3"><StatusBadge :status="entry.status" /></td>
-              <td class="py-2 pr-3">{{ entry.issuedBy || '—' }}</td>
-              <td class="py-2 pr-3">{{ entry.successCount }} ok / {{ entry.failureCount }} failed</td>
-              <td class="py-2">
-                <RouterLink class="underline" :to="{ name: 'command', params: { commandId: entry.commandId } }">Details</RouterLink>
-                <button type="button" class="ml-3 underline" @click="openRequest(entry)">View JSON</button>
-                <button type="button" class="ml-3 underline" @click="openYaml(entry)">View YAML</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section v-else class="mt-4 space-y-4" role="tabpanel">
-      <div class="grid gap-4 md:grid-cols-2">
-        <div class="rounded-xl border border-stone-200 bg-white p-5">
-          <h2 class="font-semibold">Relay last command — desired assault</h2>
-          <pre class="mono mt-3 overflow-auto text-xs">{{ pretty(status.desiredAssault) }}</pre>
-        </div>
-        <div class="rounded-xl border border-stone-200 bg-white p-5">
-          <h2 class="font-semibold">Relay last command — applied assault</h2>
-          <pre class="mono mt-3 overflow-auto text-xs">{{ pretty(status.appliedAssault) }}</pre>
-        </div>
-      </div>
-      <div class="rounded-xl border border-stone-200 bg-white p-5">
-        <h2 class="font-semibold">Maintenance actions</h2>
-        <p class="mt-1 text-sm text-stone-500">Reset CM disables assaults and waits for APPLIED. Clear demo data resets in-memory orders and inventory. It does not change the assault.</p>
-        <div class="mt-4 flex flex-wrap gap-2">
-          <button type="button" class="rounded-md border border-stone-300 px-3 py-2 text-sm disabled:opacity-50" :disabled="busy !== ''" @click="turnOff">Disable</button>
-          <button type="button" class="rounded-md bg-red-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="busy !== ''" @click="reset">Reset CM configuration</button>
-          <button type="button" class="rounded-md border border-stone-300 px-3 py-2 text-sm disabled:opacity-50" :disabled="busy !== ''" @click="clearData">Clear demo data</button>
-          <RouterLink class="rounded-md bg-stone-900 px-3 py-2 text-sm font-semibold text-white" :to="{ name: 'publish', query: { applicationName: status.applicationName } }">Configure new assault</RouterLink>
-        </div>
-        <form class="mt-6 max-w-md" @submit.prevent="enable">
-          <h3 class="font-medium">Enable Chaos Monkey</h3>
-          <label class="mt-2 block text-sm" for="expires-at">Expires at (ISO-8601)
-            <input id="expires-at" v-model="expiresAt" class="mt-1 w-full rounded-md border border-stone-300 px-3 py-2" />
-          </label>
-          <button type="submit" class="mt-3 rounded-md bg-stone-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="busy !== ''">Enable</button>
-        </form>
-      </div>
+    <section v-else id="apply-panel" class="stack" role="tabpanel" aria-labelledby="tab-apply">
+      <h2>Apply an assault</h2>
+      <p class="meta">Build it by hand, start from a preset, or fill it from a saved entry. Saving stores it on this service only.</p>
+      <CommandFormView :application-name="status.applicationName" :catalog-id="catalogId" />
     </section>
   </template>
 
-  <dialog ref="dialog" class="w-full max-w-2xl rounded-xl p-0 backdrop:bg-stone-900/40">
-    <header class="flex items-start justify-between gap-4 border-b border-stone-200 px-4 py-3">
+  <dialog ref="dialog" class="sheet">
+    <header>
       <div>
         <strong>{{ dialogTitle }}</strong>
-        <p class="text-sm text-stone-500">{{ dialogHint }}</p>
+        <p>{{ dialogHint }}</p>
       </div>
-      <form method="dialog"><button type="submit" class="rounded-md border border-stone-300 px-3 py-1 text-sm">Close</button></form>
+      <form method="dialog"><button type="submit" class="btn">Close</button></form>
     </header>
-    <pre class="mono max-h-[60vh] overflow-auto px-4 py-3 text-xs">{{ dialogText }}</pre>
+    <pre class="mono">{{ dialogText }}</pre>
   </dialog>
 </template>

@@ -1,20 +1,23 @@
 package com.samba.chaos.relay.store;
 
+import com.samba.chaos.command.ChaosCommandAction;
 import com.samba.chaos.command.ChaosCommandResult;
-import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 /**
- * Command history used by status, enable, and cleanup.
+ * Command history used by status and enable.
  *
- * <p>The default implementation keeps records in memory. A restart loses them.
+ * <p>Records are stored in the relay database. A restart keeps them.
  */
 public interface ChaosCommandStore {
 
   /**
-   * Stores a new command. A duplicate id replaces the previous record.
+   * Stores a new command. A duplicate id replaces the previous record and its results.
    *
    * @param record command and its expected instance count
    */
@@ -40,36 +43,47 @@ public interface ChaosCommandStore {
    * Commands for one application, newest {@code publishedAt} first.
    *
    * @param applicationName target application
+   * @param limit maximum number of records
    * @return matching records, empty when none exist
    */
-  List<CommandRecord> findByApplication(String applicationName);
+  List<CommandRecord> findByApplication(String applicationName, int limit);
 
   /**
-   * Every stored command. Order is not significant.
+   * Configure commands for one application, newest {@code publishedAt} first.
    *
-   * @return all records, empty when the store has none
+   * @param applicationName target application
+   * @param actions configure actions to include
+   * @return matching records, empty when none exist
    */
-  List<CommandRecord> findAll();
+  List<CommandRecord> findByApplicationAndActions(
+      String applicationName, Collection<ChaosCommandAction> actions);
 
   /**
-   * Appends one instance result. Unknown command ids are ignored.
+   * One page of commands for the named applications, newest {@code publishedAt} first.
    *
-   * @param result outcome reported by one instance
+   * @param applications allowlisted targets to include
+   * @param action action filter, or null for every action
+   * @param pageable page index and size, without a sort
+   * @return the page, empty when {@code applications} is empty
+   */
+  Page<CommandRecord> findPage(
+      Collection<String> applications, ChaosCommandAction action, Pageable pageable);
+
+  /**
+   * Every matching command, newest {@code publishedAt} first.
+   *
+   * <p>Used when the caller filters by a computed aggregate status.
+   *
+   * @param applications allowlisted targets to include
+   * @param action action filter, or null for every action
+   * @return matching records, empty when {@code applications} is empty
+   */
+  List<CommandRecord> findMatching(Collection<String> applications, ChaosCommandAction action);
+
+  /**
+   * Inserts or replaces the result for one instance. Unknown command ids are ignored.
+   *
+   * @param result outcome reported by one instance, keyed by Eureka instance id
    */
   void addResult(ChaosCommandResult result);
-
-  /**
-   * Removes one command and its instance results.
-   *
-   * @param commandId stored id
-   */
-  void delete(UUID commandId);
-
-  /**
-   * Removes records published before the cutoff.
-   *
-   * @param cutoff exclusive upper bound on {@code publishedAt}
-   * @return number of records removed
-   */
-  int deletePublishedBefore(Instant cutoff);
 }

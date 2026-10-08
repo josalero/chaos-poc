@@ -101,7 +101,7 @@ flowchart TB
             Status[ChaosCommandStatusService]
             Resolve[TargetInstancesResolver]
         end
-        Store[(InMemoryChaosCommandStore)]
+        Store[(JpaChaosCommandStore)]
         Client[ChaosCommandClient]
     end
 
@@ -152,7 +152,7 @@ flowchart TB
     App -.->|AOP watchers| CM
 ```
 
-Arrows are in-process calls except the four that leave the relay: `TargetInstancesResolver` reads Eureka, `ChaosCommandClient` fetches a token from `auth-server`, and that same client POSTs `/internal/chaos/commands` into chaos-lib. The dotted line is Chaos Monkey's aspect on host beans such as `InventoryGateway` and `AuthorizationGateway`. It is the assault path, separate from command delivery. `InMemoryChaosCommandStore` lives only in the relay process.
+Arrows are in-process calls except the four that leave the relay: `TargetInstancesResolver` reads Eureka, `ChaosCommandClient` fetches a token from `auth-server`, and that same client POSTs `/internal/chaos/commands` into chaos-lib. The dotted line is Chaos Monkey's aspect on host beans such as `InventoryGateway` and `AuthorizationGateway`. It is the assault path, separate from command delivery. `JpaChaosCommandStore` writes command history to an H2 file on the relay. History is kept. The home page reads a background Chaos Monkey status cache and does not probe actuators.
 
 | Component | Responsibility | Technology |
 | --- | --- | --- |
@@ -160,7 +160,7 @@ Arrows are in-process calls except the four that leave the relay: `TargetInstanc
 | `discovery-server` | Service registry | Eureka |
 | `config-server` | Runtime YAML from `config-repo/` | Spring Cloud Config, native backend |
 | `auth-server` | Issues relay JWTs. Signing key is generated at startup | Spring Authorization Server |
-| `chaos-command-relay-ui` | Operator console: scenarios, publish, history, reset | Vue 3, Vite, nginx |
+| `chaos-command-relay-ui` | Operator console: services, commands, saved assaults | Vue 3, Vite, nginx |
 | `chaos-command-relay` | Validate, discover, fan out, aggregate | Spring Boot, OpenFeign |
 | `chaos-lib` | Authorize `POST /internal/chaos/commands` and drive the actuator | Auto-configuration, OAuth2 resource server |
 | `chaos-poc-demo` | Order API and Chaos Monkey target | Spring Boot |
@@ -177,7 +177,7 @@ The operator console and any other client call the same relay API. `ChaosCommand
 
 | Entry | Request | Response |
 | --- | --- | --- |
-| Operator console | Browser `POST /api/relay/internal/v1/chaos/commands`. The Vue app loads the preset, sets a two-hour lease, and shows field errors on `/chaos` | Navigates to `/chaos/commands/{id}` after **202** |
+| Operator console | Browser `POST /api/relay/internal/v1/chaos/commands` from a service Apply page. The form can save the assault on that service first, then publish it with a two-hour lease | Navigates to `/chaos/commands/{id}` after **202** |
 | Relay API | `POST /internal/v1/chaos/commands` | **202** with `PUBLISHED` and a status URL. Validation failure is **400**. No UP instances is **503** |
 
 The console preset sets `expiresAt` before submit. The API caller supplies `expiresAt` when the action is `ENABLE` or `CONFIGURE_AND_ENABLE`. The status page polls `GET /internal/v1/chaos/commands/{id}` through the gateway.
@@ -228,16 +228,16 @@ Field rules, assault mapping, and outcome meanings are in [Message contract](CHA
 
 ## 6. Reset configuration to default
 
-Reset is a `DISABLE` that the relay waits for. It is the operator action labeled **Reset CM configuration** and **Reset all**.
+Reset of one service is a `DISABLE` that the relay waits for. Reset of a selection publishes one `DISABLE` per name and returns immediately. There is no reset of every allowlisted service.
 
 | Entry | Request | When it returns |
 | --- | --- | --- |
-| Console, one service | `POST /api/relay/internal/v1/chaos/services/{applicationName}/reset` | After the command is terminal. The page stays on the Reset tab |
-| Console, every allowlisted service | `POST /api/relay/internal/v1/chaos/services/reset-all` | After each service has a terminal result. The page returns to `/chaos` |
+| Console, one service | `POST /api/relay/internal/v1/chaos/services/{applicationName}/reset` | After the command is terminal. The page stays on the service overview |
+| Console, selected services | `POST /api/relay/internal/v1/chaos/services/reset` | **202** with one command id per name. The home page polls each command |
 | API, one service | `POST /internal/v1/chaos/services/{applicationName}/reset` | **200** when aggregate status is `APPLIED`. **400** when validation rejects the disable. **409** when the command finished as `FAILED` or `TIMED_OUT` |
-| API, every allowlisted service | `POST /internal/v1/chaos/services/reset-all` | **200** with one outcome per allowlisted application. The relay walks the allowlist one service at a time |
+| API, selected services | `POST /internal/v1/chaos/services/reset` | **202** with one entry per distinct name. **400** for an empty list or a name outside the allowlist, and nothing is published |
 
-`POST /internal/v1/chaos/services/{applicationName}/disable` and `scenarios/disable.json` submit the same `DISABLE` and return **202** immediately. They do not wait for `APPLIED`. The scenario runner uses that fire-and-forget form and polls status itself.
+`POST /internal/v1/chaos/services/{applicationName}/disable` and `scenarios/disable.json` submit the same `DISABLE` and return **202** immediately. They do not wait for `APPLIED`. The service page uses that fire-and-forget form and the command page polls status.
 
 ```mermaid
 sequenceDiagram
@@ -320,7 +320,7 @@ The relay client id is `chaos-command-relay`. The client secret is `CHAOS_RELAY_
 | Eureka still lists a dead instance | The relay records `UNREACHABLE` for that address. The operator submits again. |
 | Operator console and submit API have no inbound authentication | Acceptable only on this local POC. The console is a separate nginx app and calls the open relay API. |
 | Chaos Monkey actuator on each instance is open | A caller who can reach the instance can post `/actuator/chaosmonkey` without a JWT. |
-| In-memory command store | A relay restart drops command history. `ChaosCommandStoreCleanup` deletes commands older than `command-ttl-hours` (24). |
+| H2 file on the relay | Command history survives a relay restart and is kept. The file is the Compose volume `chaos-relay-data`. |
 | Expiry guard is in instance memory | An instance restart starts with `chaos.monkey.enabled: false`, so no assault survives the restart. |
 
 ## Revision history
@@ -330,3 +330,4 @@ The relay client id is `chaos-command-relay`. The client secret is `CHAOS_RELAY_
 | 2026-10-06 | Initial as-built architecture: platform wiring, apply-command flow, reset-to-default flow |
 | 2026-10-06 | Component diagram for the relay, chaos-lib, and the host assault path |
 | 2026-10-06 | Operator console moved to the Vue 3 app `chaos-command-relay-ui` |
+| 2026-10-07 | H2 command history, status cache, compact list, and selected reset |

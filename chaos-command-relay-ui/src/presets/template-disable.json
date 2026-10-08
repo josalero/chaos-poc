@@ -1,0 +1,6 @@
+{
+  "environment": "test",
+  "action": "DISABLE",
+  "issuedBy": "chaos-console",
+  "correlationId": "template-disable"
+}

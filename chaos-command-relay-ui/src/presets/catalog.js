@@ -14,12 +14,14 @@ export const presets = Object.entries(modules)
   })
   .sort(
     (left, right) =>
-      left.targetApplication.localeCompare(right.targetApplication) ||
+      (left.targetApplication || '').localeCompare(right.targetApplication || '') ||
       left.label.localeCompare(right.label),
   );
 
 export function presetsFor(targetApplication) {
-  return presets.filter((preset) => preset.targetApplication === targetApplication);
+  return presets.filter(
+    (preset) => preset.targetApplication === targetApplication || !preset.targetApplication,
+  );
 }
 
 export function findPreset(id) {

@@ -29,8 +29,50 @@ export function getService(applicationName) {
   return request(`/internal/v1/chaos/services/${encodeURIComponent(applicationName)}`);
 }
 
-export function getHistory(applicationName) {
-  return request(`/internal/v1/chaos/services/${encodeURIComponent(applicationName)}/history`);
+export function listCatalog(applicationName) {
+  return request(`/internal/v1/chaos/services/${encodeURIComponent(applicationName)}/catalog`);
+}
+
+export function listSavedCatalog(application) {
+  const query = application ? `?application=${encodeURIComponent(application)}` : '';
+  return request(`/internal/v1/chaos/catalog${query}`);
+}
+
+export function listCommands({ page = 0, size = 50, application, status, action } = {}) {
+  const params = new URLSearchParams();
+  params.set('page', String(page));
+  params.set('size', String(size));
+  if (application) {
+    params.set('application', application);
+  }
+  if (status) {
+    params.set('status', status);
+  }
+  if (action) {
+    params.set('action', action);
+  }
+  return request(`/internal/v1/chaos/commands?${params}`);
+}
+
+export function saveCatalog(applicationName, entry) {
+  return request(`/internal/v1/chaos/services/${encodeURIComponent(applicationName)}/catalog`, {
+    method: 'POST',
+    body: JSON.stringify(entry),
+  });
+}
+
+export function deleteCatalog(applicationName, catalogId) {
+  return request(
+    `/internal/v1/chaos/services/${encodeURIComponent(applicationName)}/catalog/${encodeURIComponent(catalogId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export function getHistory(applicationName, limit = 50) {
+  const bounded = Math.min(200, Math.max(1, limit));
+  return request(
+    `/internal/v1/chaos/services/${encodeURIComponent(applicationName)}/history?limit=${bounded}`,
+  );
 }
 
 export function getActuator(applicationName) {
@@ -74,10 +116,10 @@ export function clearDemoData(applicationName) {
   );
 }
 
-export function resetAll(body) {
-  return request('/internal/v1/chaos/services/reset-all', {
+export function resetSelected(applicationNames) {
+  return request('/internal/v1/chaos/services/reset', {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ issuedBy: 'chaos-console', applicationNames }),
   });
 }
 

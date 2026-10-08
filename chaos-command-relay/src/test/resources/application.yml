@@ -1,4 +1,10 @@
 spring:
+  datasource:
+    url: jdbc:h2:mem:chaos-relay;DB_CLOSE_DELAY=-1
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
   security:
     oauth2:
       client:

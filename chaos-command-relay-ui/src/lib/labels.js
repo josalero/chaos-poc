@@ -13,6 +13,9 @@ const LABELS = {
   'high-pressure-latency': 'High-pressure latency',
   'latency-success-path': 'Latency on success path',
   'service-to-service-latency': 'Service-to-service latency',
+  'template-latency': 'Latency template',
+  'template-exception': 'Exception template',
+  'template-disable': 'Disable template',
 };
 
 const DESCRIPTIONS = {
@@ -30,6 +33,9 @@ const DESCRIPTIONS = {
   'high-pressure-latency': 'Injects heavy latency so p95 climbs under load.',
   'latency-success-path': 'Adds latency while still returning success — best first demo.',
   'service-to-service-latency': 'Slows downstream calls from the order service.',
+  'template-latency': 'Adds 200–800 ms of latency on the selected service.',
+  'template-exception': 'Turns exceptions on for the selected service.',
+  'template-disable': 'Turns Chaos Monkey off on the selected service.',
 };
 
 const SERVICE_TITLES = {

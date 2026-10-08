@@ -127,7 +127,11 @@ public class ChaosServiceMaintenanceService {
   }
 
   private Optional<ChaosAssaultConfig> findConfiguredAssault(String applicationName) {
-    return commandStore.findAll().stream()
+    return commandStore
+        .findByApplicationAndActions(
+            applicationName,
+            List.of(ChaosCommandAction.CONFIGURE, ChaosCommandAction.CONFIGURE_AND_ENABLE))
+        .stream()
         .filter(record -> applicationName.equals(record.targetApplication()))
         .filter(
             record ->

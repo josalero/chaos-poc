@@ -17,7 +17,8 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 /**
- * Disable that waits until the aggregate is terminal, plus demo-data reset.
+ * Per-service disable that waits until the aggregate is terminal, plus a selected reset that
+ * returns as soon as the commands are published.
  *
  * <p>Success is only {@code APPLIED}. {@code FAILED} and {@code TIMED_OUT} are command-not-applied.
  * The wait polls every 500 ms until {@code chaos.relay.status-timeout-seconds}.
@@ -116,31 +117,41 @@ public class ChaosConfigurationResetService {
   }
 
   /**
-   * Resets each allowlisted service in order. One failure does not stop the rest.
+   * Publishes a disable command for each selected name and returns immediately. An empty list or
+   * any name outside the allowlist publishes nothing.
    *
-   * @param request issuer applied to every service
-   * @return one outcome per allowlisted application
+   * @param issuedBy operator name stored on each command
+   * @param applicationNames selected services, duplicates ignored
+   * @return a rejection, or one outcome per distinct name
    */
-  public ResetAllConfigurationResult resetAllConfigurations(ChaosMaintenanceRequest request) {
-    List<ResetAllConfigurationResult.ServiceResetOutcome> outcomes = new ArrayList<>();
-    String correlationBase =
-        request.correlationId() != null && !request.correlationId().isBlank()
-            ? request.correlationId()
-            : "console-reset-all-" + Instant.now().toEpochMilli();
-
-    for (String applicationName : relayProperties.getAllowedTargetApplications()) {
-      ChaosMaintenanceRequest perServiceRequest =
-          new ChaosMaintenanceRequest(
-              request.issuedBy() != null && !request.issuedBy().isBlank()
-                  ? request.issuedBy()
-                  : "chaos-console",
-              correlationBase + "-" + applicationName,
-              request.expiresAt());
-      outcomes.add(
-          new ResetAllConfigurationResult.ServiceResetOutcome(
-              applicationName, resetConfiguration(applicationName, perServiceRequest)));
+  public ResetSelectionResult resetSelected(String issuedBy, List<String> applicationNames) {
+    List<String> names =
+        applicationNames == null ? List.of() : applicationNames.stream().distinct().toList();
+    if (names.isEmpty()) {
+      return ResetSelectionResult.rejected(
+          List.of(new FieldError("applicationNames", "at least one service is required")));
     }
-    return new ResetAllConfigurationResult(outcomes);
+    for (String name : names) {
+      if (!relayProperties.getAllowedTargetApplications().contains(name)) {
+        return ResetSelectionResult.rejected(
+            List.of(new FieldError("applicationNames", name + " is not allowlisted")));
+      }
+    }
+    String issuer = issuedBy != null && !issuedBy.isBlank() ? issuedBy : "chaos-console";
+    List<ResetSelectionResult.ServiceReset> services = new ArrayList<>();
+    for (String name : names) {
+      ChaosServiceMaintenanceService.MaintenanceResult result =
+          maintenanceService.disable(name, new ChaosMaintenanceRequest(issuer, null, null));
+      if (result instanceof ChaosServiceMaintenanceService.MaintenanceResult.Rejected rejected) {
+        services.add(new ResetSelectionResult.ServiceReset(name, null, null, rejected.errors()));
+      } else if (result
+          instanceof ChaosServiceMaintenanceService.MaintenanceResult.Accepted accepted) {
+        services.add(
+            new ResetSelectionResult.ServiceReset(
+                name, accepted.response().commandId(), accepted.response().statusUrl(), List.of()));
+      }
+    }
+    return new ResetSelectionResult.Accepted(services);
   }
 
   private CommandAggregateStatus awaitTerminalStatus(UUID commandId) {
@@ -236,51 +247,27 @@ public class ChaosConfigurationResetService {
     record Failed(String message) implements ClearDemoDataResult {}
   }
 
-  /** One outcome per allowlisted application. */
-  public record ResetAllConfigurationResult(List<ServiceResetOutcome> outcomes) {
+  /** Outcome of a selected reset that does not wait for pods. */
+  public sealed interface ResetSelectionResult {
 
-    /** Application name paired with that service's reset result. */
-    public record ServiceResetOutcome(String applicationName, ResetConfigurationResult result) {}
+    /** Nothing was published. */
+    record Rejected(List<FieldError> errors) implements ResetSelectionResult {}
 
-    /** How many services finished APPLIED. */
-    public int successCount() {
-      return (int)
-          outcomes.stream()
-              .filter(outcome -> outcome.result() instanceof ResetConfigurationResult.Success)
-              .count();
-    }
+    /** One entry per selected name. A missing command id means that name was not published. */
+    record Accepted(List<ServiceReset> services) implements ResetSelectionResult {}
 
-    /** True when every service finished APPLIED. */
-    public boolean allSucceeded() {
-      return !outcomes.isEmpty() && successCount() == outcomes.size();
-    }
+    /** One selected service. */
+    record ServiceReset(
+        String applicationName, UUID commandId, String statusUrl, List<FieldError> errors) {}
 
-    /** Field errors for services that were rejected or did not finish APPLIED. */
-    public List<FieldError> failedServiceErrors() {
-      return outcomes.stream()
-          .flatMap(
-              outcome -> {
-                ResetConfigurationResult result = outcome.result();
-                if (result instanceof ResetConfigurationResult.Rejected rejected) {
-                  return rejected.errors().stream()
-                      .map(
-                          error ->
-                              new FieldError(
-                                  outcome.applicationName() + "." + error.field(),
-                                  error.message()));
-                }
-                if (result instanceof ResetConfigurationResult.CommandNotApplied failed) {
-                  return java.util.stream.Stream.of(
-                      new FieldError(
-                          outcome.applicationName(),
-                          "disable command finished with status "
-                              + failed.status()
-                              + " — see command "
-                              + failed.commandId()));
-                }
-                return java.util.stream.Stream.empty();
-              })
-          .toList();
+    /**
+     * Rejects the whole selection.
+     *
+     * @param errors why nothing was published
+     * @return rejected result
+     */
+    static ResetSelectionResult rejected(List<FieldError> errors) {
+      return new Rejected(errors);
     }
   }
 }
